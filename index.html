@@ -480,12 +480,19 @@ function berechneBackzettel(backtag, sorten, lager) {
     .map((v) => ({ ...v, teile: [...v.teile.entries()].map(([materialId, menge]) => ({ materialId, menge, mat: mat(materialId) })), fuer: [...v.fuer] }))
     .sort((a, b) => a.name.localeCompare(b.name, "de"));
 
+  // Verweise auf gelöschte Rohstoffe: diese Anteile kann die Lager-App nicht abbuchen
+  const verwaist = [
+    ...vorstufenListe.filter((v) => v.teile.some((t) => !t.mat)).map((v) => v.name),
+    ...teigListe.filter((t) => t.items.some((i) => !mat(i.materialId))).map((t) => t.rezept.name),
+  ];
+
   return {
     proSorte,
     teige: teigListe.sort((a, b) => b.teigG - a.teigG),
     vorstufen: vorstufenListe,
     rohstoffe,
     fehlend,
+    verwaist,
     stueckGesamt: proSorte.reduce((s, p) => s + p.stueck, 0),
     teigGesamt: teigListe.reduce((s, t) => s + t.teigG, 0),
   };
@@ -912,6 +919,12 @@ function BackzettelTab({ backtag, sorten, lager, onUebergeben, onReloadLager, on
           ⚠️ Ohne Rezept (fehlen im Teig): <b>{bz.fehlend.map((s) => s.kurz).join(", ")}</b>. Unter Einstellungen → Sorten ein Rezept zuordnen.
         </div>
       )}
+      {bz.verwaist.length > 0 && (
+        <div className="text-sm px-4 py-3 rounded-2xl no-print" style={{ backgroundColor: COL.warnSoft, color: COL.warn }}>
+          ⚠️ <b>{bz.verwaist.join(", ")}</b> verweist auf einen gelöschten Rohstoff – dieser Anteil wird nicht vom Lager abgebucht.
+          Öffne einmal die <a href={LAGER_APP_URL} className="underline">Lager-App</a> (sie repariert das automatisch) und tippe dann unter Einstellungen → App auf „Rezepte & Lagerstand neu laden“.
+        </div>
+      )}
 
       <Card>
         <H2>🥖 Stück pro Sorte</H2>
@@ -938,7 +951,7 @@ function BackzettelTab({ backtag, sorten, lager, onUebergeben, onReloadLager, on
                 </div>
                 {v.teile.length > 0 && (
                   <div className="text-sm mt-1" style={{ color: COL.amber }}>
-                    = {v.teile.map((t) => `${fmtG(t.menge)} ${t.mat?.name || "?"}`).join(" + ")}
+                    = {v.teile.map((t) => `${fmtG(t.menge)} ${t.mat?.name || "⚠ gelöschter Rohstoff"}`).join(" + ")}
                   </div>
                 )}
                 <div className="text-xs mt-0.5" style={{ color: COL.inkMuted }}>für {v.fuer.join(", ")}</div>
@@ -1098,7 +1111,7 @@ function BackzettelDruck({ backtag, sorten, kunden, lager, mitRohstoffen }) {
                   <td><Box /></td>
                   <td><b>{v.name}</b></td>
                   <td className="zahl" style={{ fontSize: "12pt" }}>{fmtG(v.menge)}</td>
-                  <td>{v.teile.map((t) => `${fmtG(t.menge)} ${t.mat?.name || "?"}`).join(" + ") || "–"}</td>
+                  <td>{v.teile.map((t) => `${fmtG(t.menge)} ${t.mat?.name || "⚠ gelöschter Rohstoff"}`).join(" + ") || "–"}</td>
                   <td style={{ fontSize: "8.5pt", color: "#555" }}>{v.fuer.join(", ")}</td>
                 </tr>
               ))}
