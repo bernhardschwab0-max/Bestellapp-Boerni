@@ -27,6 +27,7 @@
 <script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
+<script crossorigin="anonymous" integrity="sha384-mZT2gIty7ZDdOGkxfP6joZcYdMW1Jvj9dRlfpTmaJAKKXTqzygtB22k7FLe+KZC1" src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Zilla+Slab:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 <style>
   body { margin: 0; background: #FAF3E7; }
@@ -34,13 +35,30 @@
   @keyframes rise { 0% { transform: scale(.9); opacity: .6; } 50% { transform: scale(1.08); opacity: 1; } 100% { transform: scale(.9); opacity: .6; } }
   .bottom-nav { padding-bottom: max(8px, env(safe-area-inset-bottom)); }
   input[type=number]::-webkit-inner-spin-button { opacity: 1; }
+  /* ---------- Drucken ---------- */
+  .druck-overlay { position: fixed; inset: 0; z-index: 50; overflow: auto; background: #E9E2D6; }
+  .druck-blatt { background: #fff; color: #111; width: 210mm; max-width: 100%; margin: 0 auto 24px; padding: 12mm; box-shadow: 0 4px 24px rgba(0,0,0,0.12); font-family: 'IBM Plex Sans', sans-serif; font-size: 10.5pt; line-height: 1.35; }
+  .druck-blatt.quer { width: 297mm; }
+  .druck-blatt h1 { font-family: 'Fraunces', serif; font-weight: 700; font-size: 20pt; line-height: 1.1; }
+  .druck-blatt h2 { font-family: 'Fraunces', serif; font-weight: 600; font-size: 13pt; margin: 14px 0 6px; padding-bottom: 3px; border-bottom: 2px solid #111; break-after: avoid; page-break-after: avoid; }
+  .druck-blatt tr { break-inside: avoid; }
+  .druck-blatt table { width: 100%; border-collapse: collapse; }
+  .druck-blatt th { text-align: left; font-size: 8.5pt; text-transform: uppercase; letter-spacing: .04em; color: #555; border-bottom: 1.5px solid #111; padding: 3px 4px; }
+  .druck-blatt td { border-bottom: 1px solid #ccc; padding: 4px; vertical-align: top; }
+  .druck-blatt .zahl { text-align: right; font-family: 'IBM Plex Mono', monospace; font-weight: 600; white-space: nowrap; }
+  .druck-blatt .box { display: inline-block; width: 11px; height: 11px; border: 1.5px solid #111; border-radius: 2px; vertical-align: -1px; }
+  .druck-spalten { column-count: 2; column-gap: 8mm; }
+  .druck-block { break-inside: avoid; display: inline-block; width: 100%; margin-bottom: 4mm; }
+  .zettel-raster { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+  .zettel { border: 1px dashed #888; padding: 5mm; break-inside: avoid; }
+  @media (max-width: 800px) { .druck-blatt { padding: 6mm; font-size: 9.5pt; } }
   @media print {
-    .no-print { display: none !important; }
-    body, #root > div { background: #fff !important; }
-    .print-card { box-shadow: none !important; border: 1px solid #ccc !important; break-inside: avoid; }
-    .print-only { display: block !important; }
+    body { background: #fff !important; }
+    .screen-only, .no-print { display: none !important; }
+    .druck-overlay { position: static !important; overflow: visible !important; background: #fff !important; }
+    .druck-blatt { width: auto !important; max-width: none !important; margin: 0 !important; padding: 0 !important; box-shadow: none !important; }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   }
-  .print-only { display: none; }
 </style>
 </head>
 <body>
@@ -186,7 +204,8 @@ function Field({ label, children, hint }) {
 const uid = () => Math.random().toString(36).slice(2, 9);
 const fmtEUR = (n) => (isFinite(n) ? n.toLocaleString("de-DE", { style: "currency", currency: "EUR" }) : "–");
 const fmtNum = (n, d = 1) => (isFinite(n) ? n.toLocaleString("de-DE", { maximumFractionDigits: d }) : "–");
-const fmtG = (n) => (isFinite(n) ? (n >= 1000 ? `${fmtNum(n / 1000, 2)} kg` : `${fmtNum(n, n < 100 ? 1 : 0)} g`) : "–");
+// Bis 10 kg in Gramm (zum Abwiegen genauer), darüber in kg
+const fmtG = (n) => (!isFinite(n) ? "–" : n >= 10000 ? `${fmtNum(n / 1000, 2)} kg` : `${fmtNum(n, n < 100 ? 1 : 0)} g`);
 const fmtQty = (q) => (q === 0.5 ? "½" : Number.isInteger(q) ? String(q) : String(q).replace(".", ",").replace(",5", "½"));
 const WOCHENTAGE = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
 const fmtDatum = (iso) => {
@@ -285,7 +304,14 @@ function getConfig() {
   try {
     if (window.location.hash.startsWith("#setup=")) {
       const c = parseSetup(window.location.hash);
-      if (c && c.bestellBin) saveConfig(c);
+      let vorher = null;
+      try { vorher = JSON.parse(localStorage.getItem("bestellapp_config") || "null"); } catch (e) {}
+      // Schutz: ein fremder Link darf die App nicht unbemerkt auf einen anderen Speicher umstellen
+      if (
+        c && c.bestellBin &&
+        (!vorher || vorher.bestellBin === c.bestellBin ||
+          window.confirm("Achtung: Dieser Link verbindet die App mit einem ANDEREN Online-Speicher.\n\nNur bestätigen, wenn der Link von deinem eigenen Gerät stammt. Fortfahren?"))
+      ) saveConfig(c);
       window.history.replaceState(null, "", window.location.pathname + window.location.search);
     }
     const raw = localStorage.getItem("bestellapp_config");
@@ -516,6 +542,23 @@ function parseWhatsApp(text, sorten, kunden) {
   return { items: ergebnis, unbekannt, kunde };
 }
 
+// QR-Code wird direkt auf dem Gerät erzeugt – der Einrichtungs-Link (mit Schlüssel) verlässt das Gerät nicht
+function QrCode({ text, size = 220 }) {
+  const src = useMemo(() => {
+    try {
+      const qr = qrcode(0, "M");
+      qr.addData(text);
+      qr.make();
+      const zelle = Math.max(2, Math.floor(size / (qr.getModuleCount() + 8)));
+      return qr.createDataURL(zelle, zelle * 4);
+    } catch (e) {
+      return null;
+    }
+  }, [text, size]);
+  if (!src) return <p className="text-xs" style={{ color: COL.warn }}>QR-Code konnte nicht erzeugt werden – bitte den Link unten verwenden.</p>;
+  return <img src={src} width={size} height={size} alt="QR-Code zum Einrichten" style={{ imageRendering: "pixelated", borderRadius: 8, border: `1px solid ${COL.line}` }} />;
+}
+
 // ---------- Setup ----------
 function SetupScreen({ onReady }) {
   const [link, setLink] = useState("");
@@ -621,7 +664,7 @@ function BestellEditor({ start, sorten, kunden, letzteBestellung, onSave, onCanc
   const [items, setItems] = useState(start?.items || {});
   const [notiz, setNotiz] = useState(start?.notiz || "");
   const [quelle, setQuelle] = useState(start?.quelle || "whatsapp");
-  const [waText, setWaText] = useState("");
+  const [waText, setWaText] = useState(start?.nachricht || "");
   const [waOffen, setWaOffen] = useState(!start?.id);
   const [waInfo, setWaInfo] = useState(null);
   const [alleSorten, setAlleSorten] = useState(false);
@@ -639,7 +682,6 @@ function BestellEditor({ start, sorten, kunden, letzteBestellung, onSave, onCanc
       return n;
     });
     if (r.kunde && !kundeName) setKundeName(r.kunde.name);
-    if (!notiz && waText.trim()) setNotiz(waText.trim().slice(0, 300));
     setWaInfo(r);
   };
 
@@ -648,7 +690,9 @@ function BestellEditor({ start, sorten, kunden, letzteBestellung, onSave, onCanc
     const clean = Object.fromEntries(Object.entries(items).filter(([, q]) => q > 0));
     if (!Object.keys(clean).length) return alert("Die Bestellung ist noch leer.");
     const k = kunde || onNeuerKunde(kundeName.trim());
-    onSave({ ...(start || {}), id: start?.id || uid(), kundeId: k.id, items: clean, notiz, quelle, bezahlt: start?.bezahlt || false });
+    // Die WhatsApp-Nachricht wird nur zum Nachlesen gespeichert (nicht gedruckt); "notiz" kommt auf die Zettel
+    const nachricht = quelle === "whatsapp" && waText.trim() ? waText.trim().slice(0, 500) : "";
+    onSave({ ...(start || {}), id: start?.id || uid(), kundeId: k.id, items: clean, notiz: notiz.trim(), nachricht, quelle, bezahlt: start?.bezahlt || false });
   };
 
   return (
@@ -749,7 +793,7 @@ function BestellungenTab({ backtag, sorten, kunden, updateBacktag, addKunde, let
         if (window.confirm(`${kName(b.kundeId)} hat schon eine Bestellung. Zusammenführen?`)) {
           const items = { ...doppelt.items };
           Object.entries(b.items).forEach(([sid, q]) => (items[sid] = (items[sid] || 0) + q));
-          return { ...bt, bestellungen: bt.bestellungen.map((x) => (x.id === doppelt.id ? { ...x, items, notiz: [x.notiz, b.notiz].filter(Boolean).join(" · ") } : x)) };
+          return { ...bt, bestellungen: bt.bestellungen.map((x) => (x.id === doppelt.id ? { ...x, items, notiz: [x.notiz, b.notiz].filter(Boolean).join(" · "), nachricht: [x.nachricht, b.nachricht].filter(Boolean).join(" · ") } : x)) };
         }
       }
       return { ...bt, bestellungen: exists ? bt.bestellungen.map((x) => (x.id === b.id ? b : x)) : [...bt.bestellungen, { ...b, erfasst: new Date().toISOString() }] };
@@ -800,6 +844,7 @@ function BestellungenTab({ backtag, sorten, kunden, updateBacktag, addKunde, let
                 </div>
                 <div className="text-sm mt-0.5" style={{ color: COL.inkMuted }}>{bestellText(b, sorten)}</div>
                 {b.notiz && <div className="text-xs mt-1 truncate" style={{ color: COL.amber }}>📝 {b.notiz}</div>}
+                {b.nachricht && <div className="text-xs mt-1 truncate" style={{ color: "#1F7A3A" }}>💬 „{b.nachricht}“</div>}
               </button>
               <div className="flex flex-col items-end gap-1.5">
                 <div className="font-semibold" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtEUR(bestellSumme(b, sorten))}</div>
@@ -817,7 +862,7 @@ function BestellungenTab({ backtag, sorten, kunden, updateBacktag, addKunde, let
 }
 
 // ---------- Backzettel ----------
-function BackzettelTab({ backtag, sorten, lager, onUebergeben, onReloadLager }) {
+function BackzettelTab({ backtag, sorten, lager, onUebergeben, onReloadLager, onDrucken }) {
   const bz = useMemo(() => berechneBackzettel(backtag, sorten, lager), [backtag, sorten, lager]);
   const [offen, setOffen] = useState({});
   const umsatz = (backtag.bestellungen || []).reduce((s, b) => s + bestellSumme(b, sorten), 0);
@@ -832,7 +877,6 @@ function BackzettelTab({ backtag, sorten, lager, onUebergeben, onReloadLager }) 
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="print-only text-xl font-bold" style={{ fontFamily: "'Fraunces', serif" }}>Backzettel {fmtDatum(backtag.datum)}</div>
 
       <div className="grid grid-cols-3 gap-2">
         {[["🥖", fmtNum(bz.stueckGesamt), "Stück"], ["⚖️", fmtG(bz.teigGesamt), "Teig"], ["💶", fmtEUR(umsatz), "Umsatz"]].map(([e, v, l]) => (
@@ -948,7 +992,7 @@ function BackzettelTab({ backtag, sorten, lager, onUebergeben, onReloadLager }) 
       </Card>
 
       <div className="flex flex-wrap gap-2 no-print">
-        <Btn onClick={() => window.print()}><IcPrint size={16} /> Drucken</Btn>
+        <Btn onClick={() => onDrucken("backzettel")}><IcPrint size={16} /> Backzettel drucken</Btn>
         <Btn primary onClick={() => onUebergeben(bz)} disabled={!bz.rohstoffe.length}>
           <IcSend size={16} /> {backtag.lagerUebergeben ? "Nochmal an Lager-App senden" : "An Lager-App übergeben"}
         </Btn>
@@ -960,8 +1004,325 @@ function BackzettelTab({ backtag, sorten, lager, onUebergeben, onReloadLager }) 
   );
 }
 
+// ---------- Druckvorlagen ----------
+const Box = () => <span className="box" />;
+
+function DruckKopf({ titel, datum, rechts }) {
+  return (
+    <div className="flex items-end justify-between gap-4 mb-2" style={{ borderBottom: "3px solid #111", paddingBottom: 6 }}>
+      <div>
+        <div style={{ fontFamily: "'Zilla Slab', serif", fontWeight: 700, fontSize: "9pt", letterSpacing: "0.25em" }}>BÖRNI´S BACKSTUBE</div>
+        <h1>{titel}</h1>
+        <div style={{ fontSize: "13pt", fontWeight: 600 }}>{fmtDatum(datum)}</div>
+      </div>
+      <div className="text-right" style={{ fontSize: "9.5pt" }}>
+        {rechts}
+        <div style={{ color: "#777", fontSize: "8pt", marginTop: 2 }}>gedruckt {new Date().toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })}</div>
+      </div>
+    </div>
+  );
+}
+
+function BackzettelDruck({ backtag, sorten, kunden, lager, mitRohstoffen }) {
+  const bz = berechneBackzettel(backtag, sorten, lager);
+  const matName = (id) => lager?.materials?.find((m) => m.id === id)?.name || "?";
+  const kName = (id) => kunden.find((k) => k.id === id)?.name || "?";
+  const notizen = (backtag.bestellungen || []).filter((b) => b.notiz).sort((a, b) => kName(a.kundeId).localeCompare(kName(b.kundeId), "de"));
+  const gStk = (s) => gProStueck(s, findRezept(lager?.recipes || [], s.rezept));
+
+  return (
+    <>
+      <DruckKopf
+        titel="Backzettel"
+        datum={backtag.datum}
+        rechts={
+          <>
+            <div><b>{fmtNum(bz.stueckGesamt)}</b> Stück · <b>{fmtG(bz.teigGesamt)}</b> Teig</div>
+            <div>{backtag.bestellungen.length} Bestellungen</div>
+          </>
+        }
+      />
+      {bz.fehlend.length > 0 && (
+        <div style={{ border: "1.5px solid #111", padding: "4px 8px", margin: "8px 0", fontWeight: 600 }}>
+          ⚠ Ohne Rezept – nicht im Teig berechnet: {bz.fehlend.map((s) => s.kurz).join(", ")}
+        </div>
+      )}
+
+      <h2>Stück pro Sorte</h2>
+      <table>
+        <thead>
+          <tr><th style={{ width: 18 }}></th><th>Sorte</th><th className="zahl">Stück</th><th className="zahl">g / Stück</th><th className="zahl">Teig</th></tr>
+        </thead>
+        <tbody>
+          {bz.proSorte.map(({ sorte, stueck }) => (
+            <tr key={sorte.id}>
+              <td><Box /></td>
+              <td><b>{sorte.kurz}</b> <span style={{ color: "#666" }}>{sorte.name !== sorte.kurz ? sorte.name : ""}</span></td>
+              <td className="zahl" style={{ fontSize: "13pt" }}>{fmtQty(stueck)}</td>
+              <td className="zahl" style={{ fontWeight: 400 }}>{gStk(sorte) ? fmtG(gStk(sorte)) : "–"}</td>
+              <td className="zahl">{gStk(sorte) ? fmtG(gStk(sorte) * stueck) : "–"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {bz.vorstufen.length > 0 && (
+        <>
+          <h2>Vorstufen ansetzen</h2>
+          <table>
+            <thead>
+              <tr><th style={{ width: 18 }}></th><th>Vorstufe</th><th className="zahl">Menge</th><th>Zusammensetzung</th><th>für</th></tr>
+            </thead>
+            <tbody>
+              {bz.vorstufen.map((v) => (
+                <tr key={v.name}>
+                  <td><Box /></td>
+                  <td><b>{v.name}</b></td>
+                  <td className="zahl" style={{ fontSize: "12pt" }}>{fmtG(v.menge)}</td>
+                  <td>{v.teile.map((t) => `${fmtG(t.menge)} ${t.mat?.name || "?"}`).join(" + ") || "–"}</td>
+                  <td style={{ fontSize: "8.5pt", color: "#555" }}>{v.fuer.join(", ")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      {notizen.length > 0 && (
+        <>
+          <h2>Hinweise der Kunden</h2>
+          <table>
+            <tbody>
+              {notizen.map((b) => (
+                <tr key={b.id}><td style={{ width: 18 }}><Box /></td><td style={{ width: "30%" }}><b>{kName(b.kundeId)}</b></td><td>{b.notiz}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      <h2>Teige</h2>
+      <div className="druck-spalten">
+        {bz.teige.map((t) => {
+          let letzte = null;
+          return (
+            <div key={t.rezept.name} className="druck-block" style={{ border: "1.5px solid #111", borderRadius: 6, padding: "5px 7px" }}>
+              <div className="flex justify-between items-baseline gap-2">
+                <b style={{ fontFamily: "'Fraunces', serif", fontSize: "12pt" }}>{t.rezept.name}</b>
+                <b className="zahl" style={{ fontSize: "12pt", fontFamily: "'IBM Plex Mono', monospace" }}>{fmtG(t.teigG)}</b>
+              </div>
+              <div style={{ fontSize: "8.5pt", color: "#555", marginBottom: 3 }}>
+                {t.sorten.map((s) => `${fmtQty(s.stueck)}× ${s.kurz} à ${fmtG(s.g)}`).join(" · ")} · ×{fmtNum(t.faktor, 2)} Ansatz
+              </div>
+              <table>
+                <tbody>
+                  {t.items.map((it, i) => {
+                    const kopf = it.gruppe && it.gruppe !== letzte ? it.gruppe : null;
+                    letzte = it.gruppe || null;
+                    return (
+                      <React.Fragment key={i}>
+                        {kopf && (
+                          <tr><td colSpan={3} style={{ fontSize: "8pt", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", borderBottom: "none", paddingTop: 5 }}>{kopf}</td></tr>
+                        )}
+                        <tr>
+                          <td style={{ width: 16, padding: "2px 3px" }}><Box /></td>
+                          <td style={{ padding: "2px 3px" }}>{matName(it.materialId)}</td>
+                          <td className="zahl" style={{ padding: "2px 3px" }}>{fmtG(it.menge)}</td>
+                        </tr>
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {t.rezept.backen && <div style={{ fontSize: "8.5pt", marginTop: 3 }}>🔥 {t.rezept.backen}</div>}
+            </div>
+          );
+        })}
+      </div>
+
+      {mitRohstoffen && bz.rohstoffe.length > 0 && (
+        <>
+          <h2>Rohstoffbedarf gesamt (Sauerteig & Kochstücke aufgelöst)</h2>
+          <div className="druck-spalten" style={{ columnCount: 3 }}>
+            {bz.rohstoffe.map((r) => (
+              <div key={r.materialId} className="flex justify-between" style={{ breakInside: "avoid", borderBottom: "1px solid #ccc", padding: "2px 0" }}>
+                <span>{r.mat.name}</span>
+                <span className="zahl">{fmtG(r.menge)}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+function KundenzettelDruck({ backtag, sorten, kunden, mitPreisen }) {
+  const kName = (id) => kunden.find((k) => k.id === id)?.name || "?";
+  const liste = [...(backtag.bestellungen || [])].sort((a, b) => kName(a.kundeId).localeCompare(kName(b.kundeId), "de"));
+  return (
+    <div className="zettel-raster">
+      {liste.map((b) => {
+        const summe = bestellSumme(b, sorten);
+        return (
+          <div key={b.id} className="zettel">
+            <div className="flex justify-between items-baseline" style={{ fontSize: "8pt" }}>
+              <span style={{ fontFamily: "'Zilla Slab', serif", fontWeight: 700, letterSpacing: "0.2em" }}>BÖRNI´S BACKSTUBE</span>
+              <span>{fmtDatum(backtag.datum)}</span>
+            </div>
+            <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: "16pt", margin: "4px 0 6px" }}>{kName(b.kundeId)}</div>
+            <table>
+              <tbody>
+                {sorten.filter((s) => (b.items[s.id] || 0) > 0).map((s) => (
+                  <tr key={s.id}>
+                    <td style={{ width: 16, padding: "3px 2px" }}><Box /></td>
+                    <td className="zahl" style={{ width: 34, padding: "3px 4px", fontSize: "12pt" }}>{fmtQty(b.items[s.id])}×</td>
+                    <td style={{ padding: "3px 2px" }}>{s.name}</td>
+                    {mitPreisen && <td className="zahl" style={{ fontWeight: 400, padding: "3px 2px" }}>{Number(s.preis) > 0 ? fmtEUR(b.items[s.id] * s.preis) : ""}</td>}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {b.notiz && <div style={{ fontStyle: "italic", fontSize: "9pt", marginTop: 4 }}>📝 {b.notiz}</div>}
+            {mitPreisen && (
+              <div className="flex justify-between items-center" style={{ marginTop: 6, paddingTop: 4, borderTop: "2px solid #111" }}>
+                <span style={{ fontWeight: 700 }}>{b.bezahlt ? "✓ bezahlt – danke!" : "Zu zahlen"}</span>
+                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: "14pt", textDecoration: b.bezahlt ? "line-through" : "none" }}>{fmtEUR(summe)}</span>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function lieferlisteSpalten(backtag, sorten) {
+  return sorten.filter((s) => (backtag.bestellungen || []).some((b) => (b.items[s.id] || 0) > 0));
+}
+
+function LieferlisteDruck({ backtag, sorten, kunden }) {
+  const kName = (id) => kunden.find((k) => k.id === id)?.name || "?";
+  const liste = [...(backtag.bestellungen || [])].sort((a, b) => kName(a.kundeId).localeCompare(kName(b.kundeId), "de"));
+  const spalten = lieferlisteSpalten(backtag, sorten);
+  const gesamt = liste.reduce((s, b) => s + bestellSumme(b, sorten), 0);
+  const offen = liste.filter((b) => !b.bezahlt).reduce((s, b) => s + bestellSumme(b, sorten), 0);
+  return (
+    <>
+      <DruckKopf
+        titel="Lieferliste"
+        datum={backtag.datum}
+        rechts={
+          <>
+            <div>{liste.length} Kunden · Gesamt <b>{fmtEUR(gesamt)}</b></div>
+            <div>davon offen <b>{fmtEUR(offen)}</b></div>
+          </>
+        }
+      />
+      <table style={{ marginTop: 8 }}>
+        <thead>
+          <tr>
+            <th>Kunde</th>
+            {spalten.map((s) => <th key={s.id} className="zahl" style={{ textAlign: "center" }}>{s.kurz}</th>)}
+            <th className="zahl">€</th>
+            <th style={{ textAlign: "center" }}>bez.</th>
+          </tr>
+        </thead>
+        <tbody>
+          {liste.map((b, i) => (
+            <tr key={b.id} style={{ backgroundColor: i % 2 ? "#F3F3F3" : "#fff" }}>
+              <td>
+                <b>{kName(b.kundeId)}</b>
+                {b.notiz && <div style={{ fontSize: "8pt", fontStyle: "italic" }}>{b.notiz}</div>}
+              </td>
+              {spalten.map((s) => (
+                <td key={s.id} className="zahl" style={{ textAlign: "center", fontSize: "11pt" }}>{b.items[s.id] ? fmtQty(b.items[s.id]) : ""}</td>
+              ))}
+              <td className="zahl">{fmtEUR(bestellSumme(b, sorten))}</td>
+              <td style={{ textAlign: "center" }}>{b.bezahlt ? "✓" : <Box />}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr style={{ borderTop: "2px solid #111" }}>
+            <td style={{ fontWeight: 700, borderTop: "2px solid #111" }}>Summe</td>
+            {spalten.map((s) => (
+              <td key={s.id} className="zahl" style={{ textAlign: "center", borderTop: "2px solid #111", fontSize: "11pt" }}>
+                {fmtQty(liste.reduce((sum, b) => sum + (b.items[s.id] || 0), 0))}
+              </td>
+            ))}
+            <td className="zahl" style={{ borderTop: "2px solid #111" }}>{fmtEUR(gesamt)}</td>
+            <td style={{ borderTop: "2px solid #111" }}></td>
+          </tr>
+        </tfoot>
+      </table>
+    </>
+  );
+}
+
+const DRUCK_ARTEN = [
+  { key: "backzettel", label: "📋 Backzettel" },
+  { key: "kundenzettel", label: "✂️ Kundenzettel" },
+  { key: "lieferliste", label: "🧾 Lieferliste" },
+];
+
+function DruckAnsicht({ art, setArt, backtag, sorten, kunden, lager, onClose }) {
+  const [mitRohstoffen, setMitRohstoffen] = useState(false);
+  const [mitPreisen, setMitPreisen] = useState(true);
+  const quer = art === "lieferliste" && lieferlisteSpalten(backtag, sorten).length > 7;
+  const leer = !(backtag.bestellungen || []).length;
+
+  useEffect(() => {
+    const prev = document.title;
+    // Der Dateiname beim "Als PDF speichern" kommt vom Seitentitel
+    document.title = `${DRUCK_ARTEN.find((d) => d.key === art).label.replace(/^\S+\s/, "")} ${backtag.datum}`;
+    return () => (document.title = prev);
+  }, [art, backtag.datum]);
+
+  return (
+    <div className="druck-overlay">
+      <style>{`@page { size: A4 ${quer ? "landscape" : "portrait"}; margin: 10mm; }`}</style>
+      <div className="no-print sticky top-0 z-10 px-3 py-3 mb-4 flex flex-wrap items-center gap-2" style={{ backgroundColor: COL.crust, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}>
+        <div className="flex gap-1 p-1 rounded-xl" style={{ backgroundColor: "rgba(255,255,255,0.1)" }}>
+          {DRUCK_ARTEN.map((d) => (
+            <button key={d.key} onClick={() => setArt(d.key)} className="text-sm px-2.5 py-1.5 rounded-lg whitespace-nowrap" style={{ backgroundColor: art === d.key ? COL.wheat : "transparent", color: art === d.key ? COL.crust : "#fff", fontWeight: art === d.key ? 600 : 400 }}>
+              {d.label}
+            </button>
+          ))}
+        </div>
+        {art === "backzettel" && (
+          <label className="text-sm flex items-center gap-1.5"><input type="checkbox" checked={mitRohstoffen} onChange={(e) => setMitRohstoffen(e.target.checked)} /> Rohstoffbedarf mitdrucken</label>
+        )}
+        {art === "kundenzettel" && (
+          <label className="text-sm flex items-center gap-1.5"><input type="checkbox" checked={mitPreisen} onChange={(e) => setMitPreisen(e.target.checked)} /> mit Preisen</label>
+        )}
+        <div className="flex gap-2 ml-auto">
+          <button onClick={() => window.print()} disabled={leer} className="flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-xl" style={{ backgroundColor: COL.accent, color: "#fff", opacity: leer ? 0.5 : 1 }}>
+            <IcPrint size={16} /> Drucken
+          </button>
+          <button onClick={onClose} className="text-sm px-3 py-2 rounded-xl" style={{ border: "1px solid rgba(255,255,255,0.3)" }}>Schließen</button>
+        </div>
+      </div>
+      <div className={`druck-blatt ${quer ? "quer" : ""}`}>
+        {leer ? (
+          <p>Für diesen Backtag gibt es noch keine Bestellungen.</p>
+        ) : art === "backzettel" ? (
+          <BackzettelDruck backtag={backtag} sorten={sorten} kunden={kunden} lager={lager} mitRohstoffen={mitRohstoffen} />
+        ) : art === "kundenzettel" ? (
+          <KundenzettelDruck backtag={backtag} sorten={sorten} kunden={kunden} mitPreisen={mitPreisen} />
+        ) : (
+          <LieferlisteDruck backtag={backtag} sorten={sorten} kunden={kunden} />
+        )}
+      </div>
+      <p className="no-print text-center text-xs pb-8" style={{ color: COL.inkMuted }}>
+        Tipp: Am Handy im Druckmenü kannst du auch „Als PDF sichern“ wählen und den Zettel z.B. per WhatsApp weiterschicken.
+      </p>
+    </div>
+  );
+}
+
 // ---------- Kunden & Kassa ----------
-function KassaTab({ backtag, sorten, kunden, updateBacktag }) {
+function KassaTab({ backtag, sorten, kunden, updateBacktag, onDrucken }) {
   const kName = (id) => kunden.find((k) => k.id === id)?.name || "(unbekannt)";
   const liste = [...(backtag.bestellungen || [])].sort((a, b) => kName(a.kundeId).localeCompare(kName(b.kundeId), "de"));
   const gesamt = liste.reduce((s, b) => s + bestellSumme(b, sorten), 0);
@@ -978,7 +1339,6 @@ function KassaTab({ backtag, sorten, kunden, updateBacktag }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="print-only text-xl font-bold" style={{ fontFamily: "'Fraunces', serif" }}>Lieferliste {fmtDatum(backtag.datum)}</div>
       <Card className="!p-4">
         <div className="flex items-center justify-between">
           <div>
@@ -1020,7 +1380,10 @@ function KassaTab({ backtag, sorten, kunden, updateBacktag }) {
           </div>
         </Card>
       ))}
-      <div className="no-print"><Btn onClick={() => window.print()}><IcPrint size={16} /> Liste drucken</Btn></div>
+      <div className="no-print flex flex-wrap gap-2">
+        <Btn onClick={() => onDrucken("kundenzettel")}><IcPrint size={16} /> Kundenzettel drucken</Btn>
+        <Btn onClick={() => onDrucken("lieferliste")}><IcPrint size={16} /> Lieferliste drucken</Btn>
+      </div>
     </div>
   );
 }
@@ -1171,7 +1534,7 @@ function EinstellungenTab({ daten, setDaten, lager, config, onReloadLager, onDis
             <Btn onClick={() => setZeigeLink(!zeigeLink)}>📱 Neues Gerät einrichten</Btn>
             {zeigeLink && (
               <div className="flex flex-col items-center gap-2">
-                <img src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(makeSetupUrl(config))}`} width={220} height={220} alt="QR-Code" style={{ borderRadius: 8, border: `1px solid ${COL.line}` }} />
+                <QrCode text={makeSetupUrl(config)} size={220} />
                 <input readOnly value={makeSetupUrl(config)} onFocus={(e) => e.target.select()} style={{ ...inputStyle, width: "100%", fontSize: 11, fontFamily: "'IBM Plex Mono', monospace" }} />
                 <p className="text-xs text-center" style={{ color: COL.warn }}>Achtung: Wer diesen Link hat, kann auf deine Daten zugreifen – nur mit eigenen Geräten teilen.</p>
               </div>
@@ -1203,6 +1566,7 @@ function App() {
   const [sync, setSync] = useState("idle");
   const [syncFehler, setSyncFehler] = useState("");
   const [neuDatum, setNeuDatum] = useState(null); // offenes Datumsfeld für neuen Backtag
+  const [druck, setDruck] = useState(null); // "backzettel" | "kundenzettel" | "lieferliste"
   const loadedRef = useRef(false);
   const dirtyRef = useRef(false);
   const skipSaveRef = useRef(false);
@@ -1344,7 +1708,11 @@ function App() {
   const offen = backtag ? backtag.bestellungen.filter((b) => !b.bezahlt).length : 0;
 
   return (
-    <div className="min-h-screen w-full" style={{ backgroundColor: COL.bg, fontFamily: "'IBM Plex Sans', sans-serif", color: COL.ink }}>
+    <>
+    {druck && backtag && (
+      <DruckAnsicht art={druck} setArt={setDruck} backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} lager={lager} onClose={() => setDruck(null)} />
+    )}
+    <div className={`min-h-screen w-full ${druck ? "screen-only" : ""}`} style={{ backgroundColor: COL.bg, fontFamily: "'IBM Plex Sans', sans-serif", color: COL.ink }}>
       <div className="max-w-3xl mx-auto px-4 pt-4 pb-28 sm:pb-10">
         <header className="mb-4 no-print">
           <div className="relative rounded-3xl px-5 py-4" style={{ background: `radial-gradient(circle at 85% 20%, rgba(232,182,76,0.28), transparent 45%), linear-gradient(135deg, ${COL.crust} 0%, #5A3A24 100%)`, boxShadow: "0 10px 30px rgba(59,42,30,0.25)" }}>
@@ -1411,9 +1779,9 @@ function App() {
         ) : tab === "bestellungen" ? (
           <BestellungenTab backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} updateBacktag={updateBacktag} addKunde={addKunde} letzteBestellung={letzteBestellung} />
         ) : tab === "backzettel" ? (
-          <BackzettelTab backtag={backtag} sorten={daten.sorten} lager={lager} onUebergeben={uebergeben} onReloadLager={() => ladeLager()} />
+          <BackzettelTab backtag={backtag} sorten={daten.sorten} lager={lager} onUebergeben={uebergeben} onReloadLager={() => ladeLager()} onDrucken={setDruck} />
         ) : (
-          <KassaTab backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} updateBacktag={updateBacktag} />
+          <KassaTab backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} updateBacktag={updateBacktag} onDrucken={setDruck} />
         )}
 
         <nav className="sm:hidden bottom-nav no-print fixed bottom-0 left-0 right-0 z-20 flex justify-around px-2 pt-2" style={{ backgroundColor: "rgba(255,255,255,0.95)", backdropFilter: "blur(10px)", borderTop: `1px solid ${COL.line}` }}>
@@ -1435,6 +1803,7 @@ function App() {
         </nav>
       </div>
     </div>
+    </>
   );
 }
 
