@@ -1,0 +1,1453 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Börni's Backstube · Bestellungen</title>
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#3B2A1E">
+<link rel="icon" href="./icon-192.png">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Bestellungen">
+<meta name="mobile-web-app-capable" content="yes">
+<script>
+  window.addEventListener('error', function (e) {
+    var root = document.getElementById('root');
+    if (root && !root.dataset.rendered) {
+      root.innerHTML = '<div style="padding:24px;font-family:monospace;white-space:pre-wrap;color:#B3401D;background:#FBEAE2;max-width:700px;margin:40px auto;border-radius:8px;line-height:1.5;">' +
+        '<strong>Fehler beim Laden der App:</strong>\n\n' + (e.message || 'Unbekannter Fehler') +
+        '\n\nDatei: ' + (e.filename || '-') + ' Zeile: ' + (e.lineno || '-') +
+        '\n\nBitte mach einen Screenshot von diesem Text.</div>';
+    }
+  });
+</script>
+<script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Zilla+Slab:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  body { margin: 0; background: #FAF3E7; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+  @keyframes rise { 0% { transform: scale(.9); opacity: .6; } 50% { transform: scale(1.08); opacity: 1; } 100% { transform: scale(.9); opacity: .6; } }
+  .bottom-nav { padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+  input[type=number]::-webkit-inner-spin-button { opacity: 1; }
+  @media print {
+    .no-print { display: none !important; }
+    body, #root > div { background: #fff !important; }
+    .print-card { box-shadow: none !important; border: 1px solid #ccc !important; break-inside: avoid; }
+    .print-only { display: block !important; }
+  }
+  .print-only { display: none; }
+</style>
+</head>
+<body>
+<div id="root">
+  <div style="padding:24px;font-family:sans-serif;color:#8A8073;max-width:500px;margin:60px auto;text-align:center;">
+    Lade die App …
+  </div>
+</div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo, useRef } = React;
+
+// ---------- Einstellungen ----------
+const LAGER_APP_URL = "https://bernhardschwab0-max.github.io/Lagerapp-B-rni/";
+const MAX_BACKTAGE = 26; // ältere Backtage werden beim Speichern entfernt (jsonbin-Gratislimit 100 kb)
+
+// ---------- Design (wie Lager-App) ----------
+const COL = {
+  bg: "#FAF3E7",
+  surface: "#FFFFFF",
+  ink: "#2E2118",
+  inkMuted: "#8C7C68",
+  line: "#EADFC9",
+  accent: "#C4622D",
+  accentSoft: "#F9E7D8",
+  crust: "#3B2A1E",
+  wheat: "#E8B64C",
+  warn: "#B3401D",
+  warnSoft: "#FBEAE2",
+  ok: "#55804A",
+  okSoft: "#E9F1E4",
+  amber: "#A9720C",
+  amberSoft: "#FBF1DE",
+};
+const inputStyle = {
+  border: `1px solid ${COL.line}`,
+  borderRadius: "10px",
+  padding: "9px 11px",
+  fontFamily: "'IBM Plex Sans', sans-serif",
+  fontSize: "15px",
+  color: COL.ink,
+  backgroundColor: "#fff",
+  outline: "none",
+  minWidth: 0,
+};
+
+function Icon({ size = 18, strokeWidth = 2, children }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+      {children}
+    </svg>
+  );
+}
+const IcList = (p) => (<Icon {...p}><path d="M9 6h11M9 12h11M9 18h11" /><circle cx="4" cy="6" r="1" /><circle cx="4" cy="12" r="1" /><circle cx="4" cy="18" r="1" /></Icon>);
+const IcBread = (p) => (<Icon {...p}><path d="M4 11a4 4 0 0 1 2-7h12a4 4 0 0 1 2 7v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z" /><path d="M9 9v6M15 9v6" /></Icon>);
+const IcUsers = (p) => (<Icon {...p}><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0" /><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6" /></Icon>);
+const IcGear = (p) => (<Icon {...p}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></Icon>);
+const IcPlus = (p) => (<Icon {...p}><path d="M12 5v14M5 12h14" /></Icon>);
+const IcMinus = (p) => (<Icon {...p}><path d="M5 12h14" /></Icon>);
+const IcX = (p) => (<Icon {...p}><path d="M18 6 6 18M6 6l12 12" /></Icon>);
+const IcEdit = (p) => (<Icon {...p}><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></Icon>);
+const IcTrash = (p) => (<Icon {...p}><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" /></Icon>);
+const IcPrint = (p) => (<Icon {...p}><path d="M6 9V2h12v7" /><rect x="6" y="14" width="12" height="8" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /></Icon>);
+const IcSend = (p) => (<Icon {...p}><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z" /></Icon>);
+
+function WheatLogo({ size = 40, color = COL.wheat }) {
+  const grains = [0, 1, 2, 3, 4];
+  return (
+    <svg width={size} height={size} viewBox="0 0 40 48" fill={color} aria-hidden="true">
+      <path d="M21 47 C20 38 20.5 30 22 20" stroke={color} strokeWidth="1.6" fill="none" strokeLinecap="round" />
+      {grains.map((i) => {
+        const y = 34 - i * 6;
+        return (
+          <g key={i}>
+            <ellipse cx={16.5 + i * 0.4} cy={y} rx="3.2" ry="6" transform={`rotate(-32 ${16.5 + i * 0.4} ${y})`} />
+            <ellipse cx={26 + i * 0.1} cy={y - 2} rx="3.2" ry="6" transform={`rotate(28 ${26 + i * 0.1} ${y - 2})`} />
+          </g>
+        );
+      })}
+      <ellipse cx="22.5" cy="6" rx="3" ry="5.5" transform="rotate(8 22.5 6)" />
+    </svg>
+  );
+}
+function Brand({ light = false, small = false }) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <WheatLogo size={small ? 30 : 40} color={light ? COL.wheat : COL.accent} />
+      <div style={{ fontFamily: "'Zilla Slab', serif", lineHeight: 1, color: light ? "#fff" : COL.crust }}>
+        <div style={{ fontSize: small ? 20 : 24, fontWeight: 700, letterSpacing: "0.02em" }}>BÖRNI´S</div>
+        <div style={{ fontSize: small ? 10.5 : 12, fontWeight: 600, letterSpacing: "0.42em", marginTop: 2 }}>BACKSTUBE</div>
+      </div>
+    </div>
+  );
+}
+
+function Card({ children, className = "", style }) {
+  return (
+    <div
+      className={`rounded-2xl p-4 sm:p-5 print-card ${className}`}
+      style={{ backgroundColor: COL.surface, border: `1px solid ${COL.line}`, boxShadow: "0 1px 2px rgba(38,32,25,0.04), 0 1px 12px rgba(38,32,25,0.03)", ...style }}
+    >
+      {children}
+    </div>
+  );
+}
+function H2({ children, right }) {
+  return (
+    <div className="flex items-center justify-between gap-2 mb-3">
+      <h2 className="text-lg" style={{ fontFamily: "'Fraunces', serif", fontWeight: 600 }}>{children}</h2>
+      {right}
+    </div>
+  );
+}
+function Btn({ children, onClick, primary, danger, small, disabled, className = "", title }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={`inline-flex items-center justify-center gap-1.5 font-medium rounded-xl transition-all ${small ? "text-xs px-2.5 py-1.5" : "text-sm px-3.5 py-2.5"} ${className}`}
+      style={{
+        backgroundColor: primary ? COL.accent : COL.surface,
+        color: primary ? "#fff" : danger ? COL.warn : COL.ink,
+        border: `1px solid ${primary ? COL.accent : COL.line}`,
+        boxShadow: primary ? "0 2px 8px rgba(196,98,45,0.3)" : "none",
+        opacity: disabled ? 0.5 : 1,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+function Field({ label, children, hint }) {
+  return (
+    <label className="flex flex-col gap-1 text-sm">
+      <span style={{ color: COL.inkMuted }}>{label}</span>
+      {children}
+      {hint && <span className="text-xs" style={{ color: COL.inkMuted }}>{hint}</span>}
+    </label>
+  );
+}
+
+// ---------- Helfer ----------
+const uid = () => Math.random().toString(36).slice(2, 9);
+const fmtEUR = (n) => (isFinite(n) ? n.toLocaleString("de-DE", { style: "currency", currency: "EUR" }) : "–");
+const fmtNum = (n, d = 1) => (isFinite(n) ? n.toLocaleString("de-DE", { maximumFractionDigits: d }) : "–");
+const fmtG = (n) => (isFinite(n) ? (n >= 1000 ? `${fmtNum(n / 1000, 2)} kg` : `${fmtNum(n, n < 100 ? 1 : 0)} g`) : "–");
+const fmtQty = (q) => (q === 0.5 ? "½" : Number.isInteger(q) ? String(q) : String(q).replace(".", ",").replace(",5", "½"));
+const WOCHENTAGE = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+const fmtDatum = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso + "T12:00:00");
+  return `${WOCHENTAGE[d.getDay()]}, ${d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" })}`;
+};
+const isoHeute = () => new Date().toISOString().slice(0, 10);
+const plusTage = (iso, n) => {
+  const d = new Date(iso + "T12:00:00");
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+
+function normalizeName(s) {
+  return (s || "")
+    .toLowerCase()
+    .replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue").replace(/ß/g, "ss")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  const dp = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
+  return dp[m][n];
+}
+function nameSimilarity(a, b) {
+  const na = normalizeName(a), nb = normalizeName(b);
+  if (!na || !nb) return 0;
+  if (na === nb) return 1;
+  if (na.length >= 3 && nb.length >= 3 && (na.startsWith(nb) || nb.startsWith(na))) return 0.9;
+  if (na.length >= 4 && nb.length >= 4 && (na.includes(nb) || nb.includes(na))) return 0.8;
+  return 1 - levenshtein(na, nb) / Math.max(na.length, nb.length);
+}
+
+// Löst Vorstufen (Sauerteig, Kochstück …) rekursiv in echte Lager-Rohstoffe auf (wie in der Lager-App)
+function expandVorteige(items, materials, depth = 0) {
+  if (depth > 5) return items;
+  const result = new Map();
+  for (const it of items) {
+    const mat = materials.find((m) => m.id === it.materialId);
+    if (mat && mat.vorteig && mat.vorteig.teile && mat.vorteig.teile.length > 0) {
+      const sub = mat.vorteig.teile.map((t) => ({ materialId: t.materialId, menge: it.menge * t.anteil }));
+      expandVorteige(sub, materials, depth + 1).forEach((e) => result.set(e.materialId, (result.get(e.materialId) || 0) + e.menge));
+    } else {
+      result.set(it.materialId, (result.get(it.materialId) || 0) + it.menge);
+    }
+  }
+  return [...result.entries()].map(([materialId, menge]) => ({ materialId, menge }));
+}
+
+// ---------- Standard-Sorten (Kürzel wie in deiner Verkaufsliste) ----------
+// rezept = Rezeptname in der Lager-App; gProStueck leer = Teiggewicht aus dem Rezept
+const STANDARD_SORTEN = [
+  { kurz: "Bauern", name: "Bauernbrot", rezept: "Bauernbrot", preis: 4.2, halbe: true, aliases: "bauernbrot" },
+  { kurz: "Dinkel", name: "Dinkelbrot", rezept: "Dinkelpur", preis: 4.2, halbe: true, aliases: "dinkelpur, dinkelbrot" },
+  { kurz: "RT", name: "Roggentraum", rezept: "Roggentraum", preis: 0, halbe: true, aliases: "roggentraum, roggen traum" },
+  { kurz: "Zeitlos", name: "Zeitlos", rezept: "Zeitlos", preis: 0, halbe: true, aliases: "" },
+  { kurz: "Dinkl", name: "Dinkelkrusti", rezept: "Dinkelkrusti", preis: 1.0, aliases: "dinkelkrusti, krusti, dinkelweckerl" },
+  { kurz: "Mehrk.", name: "Mehrkorn", rezept: "", preis: 0, aliases: "mehrkorn, mehrkornweckerl" },
+  { kurz: "D.Knolle", name: "Dinkelknolle", rezept: "", preis: 0, aliases: "dinkelknolle, knolle" },
+  { kurz: "Käse", name: "Käseweckerl", rezept: "", preis: 1.5, aliases: "kaese, käseweckerl, käsestangerl" },
+  { kurz: "Speck", name: "Speckweckerl", rezept: "", preis: 2.0, aliases: "speckweckerl, speckstangerl" },
+  { kurz: "SchiKä", name: "Schinken-Käse", rezept: "", preis: 2.0, aliases: "schinken käse, schinkenkäse, schinken-käse" },
+  { kurz: "Kn Cia", name: "Knoblauch-Ciabatta", rezept: "Knoblauch Dinkelciabatta", preis: 4.0, aliases: "knoblauch ciabatta, knoblauchciabatta, ciabatta, knobi" },
+  { kurz: "Strizl", name: "Striezel", rezept: "", preis: 6.0, aliases: "striezel, brioche striezel" },
+  { kurz: "Zimz", name: "Zimtschnecke", rezept: "", preis: 3.5, aliases: "zimt, zimtschnecke, zimtschnecken" },
+  { kurz: "Mohn", name: "Mohnkipferl", rezept: "", preis: 0, aliases: "mohnkipferl, mohnflesserl" },
+  { kurz: "VK", name: "Vollkornbrot", rezept: "Vollkornbrot", preis: 4.2, halbe: true, aktiv: false, aliases: "vollkorn, vollkornbrot" },
+  { kurz: "Rp", name: "Roggenpur", rezept: "Roggenpur", preis: 4.2, halbe: true, aktiv: false, aliases: "roggenpur, roggenbrot" },
+  { kurz: "Christl", name: "A Christel", rezept: "A Christel", preis: 4.0, halbe: true, aktiv: false, aliases: "christel, a christel" },
+  { kurz: "Korn", name: "Kornspitz", rezept: "Kornspitz", preis: 1.0, aktiv: false, aliases: "kornspitz" },
+].map((s) => ({ id: uid(), gProStueck: "", extras: [], aktiv: true, halbe: false, ...s }));
+
+const leereDaten = () => ({ version: 1, sorten: STANDARD_SORTEN, kunden: [], backtage: [] });
+
+// ---------- Speicher (jsonbin.io) ----------
+// Bestell-Daten liegen in einem eigenen Speicher. Rezepte & Rohstoffe werden aus dem Speicher der Lager-App nur GELESEN.
+function parseSetup(text) {
+  const t = (text || "").trim();
+  const m = t.match(/#setup=([^\s]+)/);
+  if (!m) return null;
+  try {
+    const parts = atob(decodeURIComponent(m[1])).split("|");
+    if (parts.length >= 2 && parts[0] && parts[1]) return { apiKey: parts[0], lagerBin: parts[1], bestellBin: parts[2] || "" };
+  } catch (e) {}
+  return null;
+}
+function getConfig() {
+  try {
+    if (window.location.hash.startsWith("#setup=")) {
+      const c = parseSetup(window.location.hash);
+      if (c && c.bestellBin) saveConfig(c);
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+    const raw = localStorage.getItem("bestellapp_config");
+    if (raw) {
+      const c = JSON.parse(raw);
+      if (c.apiKey && c.lagerBin && c.bestellBin) return c;
+    }
+  } catch (e) {}
+  return null;
+}
+function saveConfig(c) {
+  localStorage.setItem("bestellapp_config", JSON.stringify({ apiKey: c.apiKey, lagerBin: c.lagerBin, bestellBin: c.bestellBin }));
+}
+function makeSetupUrl(c) {
+  return `${window.location.origin}${window.location.pathname}#setup=${encodeURIComponent(btoa(`${c.apiKey}|${c.lagerBin}|${c.bestellBin}`))}`;
+}
+async function binRead(apiKey, binId) {
+  const res = await fetch(`https://api.jsonbin.io/v3/b/${binId}/latest`, { headers: { "X-Master-Key": apiKey } });
+  if (!res.ok) throw new Error(`Laden fehlgeschlagen (${res.status})`);
+  return (await res.json()).record;
+}
+async function binWrite(apiKey, binId, data) {
+  const res = await fetch(`https://api.jsonbin.io/v3/b/${binId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", "X-Master-Key": apiKey },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    let msg = `Fehler ${res.status}`;
+    try { msg += ": " + ((await res.json()).message || ""); } catch (e) {}
+    throw new Error(msg);
+  }
+}
+async function binCreate(apiKey, data) {
+  const res = await fetch("https://api.jsonbin.io/v3/b", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Master-Key": apiKey, "X-Bin-Name": "bestellungen", "X-Bin-Private": "true" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Erstellen fehlgeschlagen");
+  return (await res.json()).metadata.id;
+}
+
+// ---------- Rechnen: Backzettel ----------
+function rezeptGesamt(r) {
+  return r.items.reduce((s, it) => s + (Number(it.menge) || 0), 0);
+}
+function findRezept(recipes, name) {
+  if (!name) return null;
+  const n = name.trim().toLowerCase();
+  return recipes.find((r) => r.name.trim().toLowerCase() === n) || null;
+}
+// Teiggewicht pro Stück: eigener Wert oder aus dem Rezept (Ansatz-Gewicht / Stück pro Ansatz)
+function gProStueck(sorte, rezept) {
+  const eigen = Number(String(sorte.gProStueck ?? "").replace(",", "."));
+  if (eigen > 0) return eigen;
+  if (!rezept) return 0;
+  return rezeptGesamt(rezept) / (rezept.stueckProAnsatz || 1);
+}
+
+const VORSTUFE_RE = /sauerteig|kochst|quellst|vorteig|br(ü|ue)hst/i;
+
+function berechneBackzettel(backtag, sorten, lager) {
+  const recipes = lager?.recipes || [];
+  const materials = lager?.materials || [];
+  const mat = (id) => materials.find((m) => m.id === id);
+
+  // 1) Stück pro Sorte
+  const stueck = new Map();
+  (backtag?.bestellungen || []).forEach((b) =>
+    Object.entries(b.items || {}).forEach(([sid, q]) => stueck.set(sid, (stueck.get(sid) || 0) + (Number(q) || 0)))
+  );
+  const proSorte = sorten
+    .filter((s) => (stueck.get(s.id) || 0) > 0)
+    .map((s) => ({ sorte: s, stueck: stueck.get(s.id) }));
+
+  // 2) Teig pro Rezept (Hauptteig + Extras wie Füllungen)
+  const teige = new Map(); // rezeptName -> {rezept, teigG, sorten:[]}
+  const fehlend = [];
+  proSorte.forEach(({ sorte, stueck: q }) => {
+    const teile = [{ rezept: sorte.rezept, g: sorte.gProStueck, haupt: true }, ...(sorte.extras || [])];
+    teile.forEach((t) => {
+      const rezept = findRezept(recipes, t.rezept);
+      if (!rezept) {
+        if (t.haupt) fehlend.push(sorte);
+        return;
+      }
+      const g = t.haupt ? gProStueck(sorte, rezept) : Number(String(t.g || "").replace(",", ".")) || 0;
+      if (!g) return;
+      const key = rezept.name;
+      if (!teige.has(key)) teige.set(key, { rezept, teigG: 0, sorten: [] });
+      const e = teige.get(key);
+      e.teigG += q * g;
+      e.sorten.push({ kurz: sorte.kurz, stueck: q, g });
+    });
+  });
+
+  // 3) Zutaten je Teig skaliert + Vorstufen sammeln
+  const vorstufen = new Map(); // name -> {name, menge, teile: Map(materialId -> menge), fuer: Set}
+  const addVorstufe = (name, menge, teile, fuer) => {
+    if (!vorstufen.has(name)) vorstufen.set(name, { name, menge: 0, teile: new Map(), fuer: new Set() });
+    const v = vorstufen.get(name);
+    v.menge += menge;
+    teile.forEach(({ materialId, menge: m }) => v.teile.set(materialId, (v.teile.get(materialId) || 0) + m));
+    v.fuer.add(fuer);
+  };
+  const alleItems = [];
+  const teigListe = [...teige.values()].map((t) => {
+    const gesamt = rezeptGesamt(t.rezept);
+    const faktor = gesamt > 0 ? t.teigG / gesamt : 0;
+    const items = t.rezept.items.map((it) => ({ ...it, menge: it.menge * faktor }));
+    alleItems.push(...items);
+    // Vorstufen-Rohstoffe (z.B. "Sauerteig R.", "Kochstück D.")
+    items.forEach((it) => {
+      const m = mat(it.materialId);
+      if (m && VORSTUFE_RE.test(m.name)) {
+        const teile = m.vorteig?.teile?.length
+          ? m.vorteig.teile.map((tt) => ({ materialId: tt.materialId, menge: it.menge * tt.anteil }))
+          : [];
+        addVorstufe(m.name, it.menge, teile, t.rezept.name);
+      }
+    });
+    // Vorstufen als Abschnitt im Rezept (z.B. "Kochstück" im Vollkornbrot, "Quellstück" im Körnerkick)
+    const abschnitte = new Map();
+    items.forEach((it) => {
+      if (it.gruppe && VORSTUFE_RE.test(it.gruppe)) {
+        if (!abschnitte.has(it.gruppe)) abschnitte.set(it.gruppe, []);
+        abschnitte.get(it.gruppe).push(it);
+      }
+    });
+    abschnitte.forEach((its, gruppe) =>
+      addVorstufe(`${gruppe} (${t.rezept.name})`, its.reduce((s, i) => s + i.menge, 0), its.map((i) => ({ materialId: i.materialId, menge: i.menge })), t.rezept.name)
+    );
+    return { ...t, faktor, items };
+  });
+
+  // 4) Rohstoffbedarf fürs Lager (alles in echte Rohstoffe aufgelöst)
+  const rohstoffe = expandVorteige(
+    alleItems.map((i) => ({ materialId: i.materialId, menge: i.menge })),
+    materials
+  )
+    .map((r) => ({ ...r, mat: mat(r.materialId) }))
+    .filter((r) => r.mat && r.menge > 0)
+    .sort((a, b) => b.menge - a.menge);
+
+  const vorstufenListe = [...vorstufen.values()]
+    .map((v) => ({ ...v, teile: [...v.teile.entries()].map(([materialId, menge]) => ({ materialId, menge, mat: mat(materialId) })), fuer: [...v.fuer] }))
+    .sort((a, b) => a.name.localeCompare(b.name, "de"));
+
+  return {
+    proSorte,
+    teige: teigListe.sort((a, b) => b.teigG - a.teigG),
+    vorstufen: vorstufenListe,
+    rohstoffe,
+    fehlend,
+    stueckGesamt: proSorte.reduce((s, p) => s + p.stueck, 0),
+    teigGesamt: teigListe.reduce((s, t) => s + t.teigG, 0),
+  };
+}
+
+function bestellSumme(b, sorten) {
+  return Object.entries(b.items || {}).reduce((s, [sid, q]) => {
+    const so = sorten.find((x) => x.id === sid);
+    return s + (Number(q) || 0) * (Number(so?.preis) || 0);
+  }, 0);
+}
+function bestellText(b, sorten) {
+  return sorten
+    .filter((s) => (b.items?.[s.id] || 0) > 0)
+    .map((s) => `${fmtQty(b.items[s.id])}× ${s.kurz}`)
+    .join(", ");
+}
+
+// ---------- WhatsApp-Text erkennen ----------
+const ZAHLWOERTER = { ein: 1, eins: 1, eine: 1, einen: 1, einem: 1, zwei: 2, drei: 3, vier: 4, "fünf": 5, fuenf: 5, sechs: 6, sieben: 7, acht: 8, neun: 9, zehn: 10, elf: 11, "zwölf": 12, zwoelf: 12, halbes: 0.5, halbe: 0.5, halben: 0.5, halb: 0.5 };
+function parseWhatsApp(text, sorten, kunden) {
+  const ergebnis = {};
+  const unbekannt = [];
+  const kandidaten = [];
+  sorten.forEach((s) => {
+    [s.kurz, s.name, ...(s.aliases || "").split(",")].map((x) => x.trim()).filter(Boolean).forEach((n) => kandidaten.push({ s, n }));
+  });
+  const segmente = text
+    .replace(/½/g, " 0.5 ")
+    .replace(/1\/2/g, " 0.5 ")
+    .split(/\n|,|;|\+|\bund\b|\bu\.\s|&/i)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  segmente.forEach((seg) => {
+    const woerter = seg.replace(/[!?.:()]/g, " ").split(/\s+/).filter(Boolean);
+    let menge = null;
+    const rest = [];
+    woerter.forEach((w) => {
+      const wl = w.toLowerCase();
+      const num = wl.match(/^(\d+(?:[.,]\d+)?)(x|stk|stück|st)?$/);
+      if (/^halb(e|es|en)?$/.test(wl)) menge = menge && menge > 1 ? menge * 0.5 : 0.5; // "ein halbes" = ½, "zwei halbe" = 1
+      else if (num && menge === null) menge = parseFloat(num[1].replace(",", "."));
+      else if (/^x$|^stk\.?$|^stück$|^mal$/.test(wl)) {}
+      else if (ZAHLWOERTER[wl] !== undefined && menge === null) menge = ZAHLWOERTER[wl];
+      else rest.push(w);
+    });
+    if (!rest.length) return;
+    // Bestes Wort / Wortpaar finden
+    let best = null;
+    for (let i = 0; i < rest.length; i++) {
+      for (let len = 1; len <= 3 && i + len <= rest.length; len++) {
+        const phrase = rest.slice(i, i + len).join(" ");
+        if (normalizeName(phrase).length < 2) continue;
+        kandidaten.forEach(({ s, n }) => {
+          const score = nameSimilarity(phrase, n);
+          if (!best || score > best.score) best = { s, score };
+        });
+      }
+    }
+    if (best && best.score >= 0.72) {
+      ergebnis[best.s.id] = (ergebnis[best.s.id] || 0) + (menge ?? 1);
+    } else if (menge !== null) {
+      unbekannt.push(seg);
+    }
+  });
+  // Kundenname im Text?
+  let kunde = null;
+  const tn = normalizeName(text);
+  kunden.forEach((k) => {
+    const kn = normalizeName(k.name);
+    if (kn.length >= 3 && tn.includes(kn) && (!kunde || kn.length > normalizeName(kunde.name).length)) kunde = k;
+  });
+  return { items: ergebnis, unbekannt, kunde };
+}
+
+// ---------- Setup ----------
+function SetupScreen({ onReady }) {
+  const [link, setLink] = useState("");
+  const [modus, setModus] = useState("neu");
+  const [bestellBin, setBestellBin] = useState("");
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState("");
+
+  const los = async () => {
+    setError("");
+    const c = parseSetup(link);
+    if (!c) {
+      setError("Das ist kein gültiger Link. Kopiere ihn in der Lager-App unter Einstellungen → „Neues Gerät einrichten“.");
+      return;
+    }
+    if (c.bestellBin) {
+      saveConfig(c);
+      onReady();
+      return;
+    }
+    setWorking(true);
+    try {
+      await binRead(c.apiKey, c.lagerBin); // prüft, ob der Link stimmt
+      let bin = bestellBin.trim();
+      if (modus === "neu") bin = await binCreate(c.apiKey, leereDaten());
+      else await binRead(c.apiKey, bin);
+      saveConfig({ ...c, bestellBin: bin });
+      onReady();
+    } catch (e) {
+      setError("Verbinden fehlgeschlagen: " + (e.message || "unbekannter Fehler"));
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen w-full flex items-center justify-center px-4 py-10" style={{ backgroundColor: COL.bg, fontFamily: "'IBM Plex Sans', sans-serif", color: COL.ink }}>
+      <div className="w-full max-w-md">
+        <div className="flex justify-center mb-6"><Brand /></div>
+        <Card>
+          <h1 className="text-xl mb-1" style={{ fontFamily: "'Fraunces', serif", fontWeight: 700 }}>Bestell-App einrichten 🧾</h1>
+          <p className="text-sm mb-4" style={{ color: COL.inkMuted }}>
+            Die Bestell-App holt sich Rezepte und Rohstoffe aus deiner Lager-App. Öffne dort <b>Einstellungen → Neues Gerät einrichten</b>, kopiere den Link und füge ihn hier ein.
+          </p>
+          <div className="flex flex-col gap-3">
+            <Field label="Link aus der Lager-App (oder Einrichtungs-Link der Bestell-App)">
+              <textarea style={{ ...inputStyle, minHeight: 80, fontSize: 12, fontFamily: "'IBM Plex Mono', monospace" }} value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…#setup=…" />
+            </Field>
+            {!parseSetup(link)?.bestellBin && (
+              <div className="flex gap-1 p-1 rounded-xl" style={{ backgroundColor: COL.bg }}>
+                {[["neu", "Erstes Gerät"], ["vorhanden", "Speicher schon vorhanden"]].map(([k, l]) => (
+                  <button key={k} onClick={() => setModus(k)} className="flex-1 text-sm py-2 rounded-lg" style={{ backgroundColor: modus === k ? COL.accent : "transparent", color: modus === k ? "#fff" : COL.ink }}>{l}</button>
+                ))}
+              </div>
+            )}
+            {modus === "vorhanden" && !parseSetup(link)?.bestellBin && (
+              <Field label="Bestell-Speicher-ID (vom ersten Gerät)">
+                <input style={inputStyle} value={bestellBin} onChange={(e) => setBestellBin(e.target.value)} />
+              </Field>
+            )}
+            {error && <div className="text-sm px-3 py-2 rounded-lg" style={{ backgroundColor: COL.warnSoft, color: COL.warn }}>{error}</div>}
+            <Btn primary onClick={los} disabled={working || !link.trim()}>{working ? "Einen Moment …" : "Los geht's"}</Btn>
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Bestellung erfassen ----------
+function Stepper({ value, onChange, halbe }) {
+  const step = 1;
+  return (
+    <div className="flex items-center gap-1">
+      {halbe && (
+        <button onClick={() => onChange(value + 0.5)} className="h-9 px-2 rounded-full text-xs font-semibold" style={{ border: `1px dashed ${COL.accent}`, color: COL.accent }} aria-label="ein halbes dazu">
+          +½
+        </button>
+      )}
+      <button onClick={() => onChange(Math.max(0, Math.round((value - step) * 2) / 2))} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ border: `1px solid ${COL.line}`, backgroundColor: COL.surface, color: COL.ink }} aria-label="weniger">
+        <IcMinus size={16} />
+      </button>
+      <input
+        type="number"
+        inputMode="decimal"
+        min="0"
+        step="0.5"
+        value={value || ""}
+        placeholder="0"
+        onChange={(e) => onChange(Math.max(0, Number(e.target.value.replace(",", ".")) || 0))}
+        className="text-center font-semibold"
+        style={{ ...inputStyle, width: 52, padding: "6px 2px", fontSize: 16 }}
+      />
+      <button onClick={() => onChange(Math.round((value + step) * 2) / 2)} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ backgroundColor: value > 0 ? COL.accent : COL.accentSoft, color: value > 0 ? "#fff" : COL.accent }} aria-label="mehr">
+        <IcPlus size={16} />
+      </button>
+    </div>
+  );
+}
+
+function BestellEditor({ start, sorten, kunden, letzteBestellung, onSave, onCancel, onNeuerKunde }) {
+  const [kundeName, setKundeName] = useState(start?.kundeName || "");
+  const [items, setItems] = useState(start?.items || {});
+  const [notiz, setNotiz] = useState(start?.notiz || "");
+  const [quelle, setQuelle] = useState(start?.quelle || "whatsapp");
+  const [waText, setWaText] = useState("");
+  const [waOffen, setWaOffen] = useState(!start?.id);
+  const [waInfo, setWaInfo] = useState(null);
+  const [alleSorten, setAlleSorten] = useState(false);
+
+  const kunde = kunden.find((k) => k.name.trim().toLowerCase() === kundeName.trim().toLowerCase());
+  const letzte = kunde ? letzteBestellung(kunde.id) : null;
+  const sichtbar = sorten.filter((s) => alleSorten || s.aktiv || (items[s.id] || 0) > 0);
+  const summe = Object.entries(items).reduce((s, [sid, q]) => s + q * (Number(sorten.find((x) => x.id === sid)?.preis) || 0), 0);
+
+  const erkennen = () => {
+    const r = parseWhatsApp(waText, sorten, kunden);
+    setItems((prev) => {
+      const n = { ...prev };
+      Object.entries(r.items).forEach(([sid, q]) => (n[sid] = q));
+      return n;
+    });
+    if (r.kunde && !kundeName) setKundeName(r.kunde.name);
+    if (!notiz && waText.trim()) setNotiz(waText.trim().slice(0, 300));
+    setWaInfo(r);
+  };
+
+  const speichern = () => {
+    if (!kundeName.trim()) return alert("Bitte einen Kunden eintragen.");
+    const clean = Object.fromEntries(Object.entries(items).filter(([, q]) => q > 0));
+    if (!Object.keys(clean).length) return alert("Die Bestellung ist noch leer.");
+    const k = kunde || onNeuerKunde(kundeName.trim());
+    onSave({ ...(start || {}), id: start?.id || uid(), kundeId: k.id, items: clean, notiz, quelle, bezahlt: start?.bezahlt || false });
+  };
+
+  return (
+    <Card className="mb-4" style={{ border: `2px solid ${COL.accent}`, animation: "fadeIn .2s ease" }}>
+      <H2 right={<button onClick={onCancel} style={{ color: COL.inkMuted }} aria-label="Schließen"><IcX /></button>}>
+        {start?.id ? "✏️ Bestellung ändern" : "🧾 Neue Bestellung"}
+      </H2>
+
+      <div className="flex flex-col gap-3">
+        <Field label="Kunde">
+          <input style={inputStyle} list="kunden-liste" value={kundeName} onChange={(e) => setKundeName(e.target.value)} placeholder="Name eintippen …" autoFocus={!start?.id} />
+          <datalist id="kunden-liste">{kunden.map((k) => <option key={k.id} value={k.name} />)}</datalist>
+        </Field>
+        {kundeName.trim() && !kunde && <div className="text-xs -mt-2" style={{ color: COL.amber }}>✨ Neuer Kunde – wird beim Speichern angelegt.</div>}
+        {letzte && !start?.id && (
+          <button onClick={() => setItems({ ...letzte.items })} className="text-left text-sm px-3 py-2 rounded-xl" style={{ backgroundColor: COL.amberSoft, color: COL.amber }}>
+            🔁 Wie letztes Mal: <b>{bestellText(letzte, sorten)}</b>
+          </button>
+        )}
+
+        <div className="flex gap-1 p-1 rounded-xl" style={{ backgroundColor: COL.bg }}>
+          {[["whatsapp", "💬 WhatsApp"], ["selbst", "✍️ Selbst / Telefon"]].map(([k, l]) => (
+            <button key={k} onClick={() => setQuelle(k)} className="flex-1 text-sm py-2 rounded-lg" style={{ backgroundColor: quelle === k ? COL.surface : "transparent", boxShadow: quelle === k ? "0 1px 3px rgba(0,0,0,0.08)" : "none", fontWeight: quelle === k ? 600 : 400 }}>{l}</button>
+          ))}
+        </div>
+
+        {quelle === "whatsapp" && (
+          <div className="rounded-xl p-3" style={{ backgroundColor: "#E7F6EA", border: "1px solid #C9E8CF" }}>
+            <button onClick={() => setWaOffen(!waOffen)} className="text-sm font-semibold w-full text-left" style={{ color: "#1F7A3A" }}>
+              💬 WhatsApp-Nachricht einfügen {waOffen ? "▾" : "▸"}
+            </button>
+            {waOffen && (
+              <div className="mt-2 flex flex-col gap-2">
+                <textarea style={{ ...inputStyle, minHeight: 80 }} value={waText} onChange={(e) => setWaText(e.target.value)} placeholder={"z.B. „Hallo Börni, bitte 2 Bauern, ein halbes Dinkel und 6 Dinkelkrusti 😊“"} />
+                <div className="flex gap-2 items-center flex-wrap">
+                  <Btn small onClick={async () => { try { setWaText(await navigator.clipboard.readText()); } catch (e) { alert("Einfügen nicht erlaubt – bitte lange ins Feld tippen und „Einfügen“ wählen."); } }}>📋 Aus Zwischenablage</Btn>
+                  <Btn small primary onClick={erkennen} disabled={!waText.trim()}>✨ Erkennen</Btn>
+                </div>
+                {waInfo && (
+                  <div className="text-xs" style={{ color: "#1F7A3A" }}>
+                    {Object.keys(waInfo.items).length} Sorte(n) erkannt{waInfo.kunde ? `, Kunde: ${waInfo.kunde.name}` : ""}. Bitte kurz kontrollieren.
+                    {waInfo.unbekannt.length > 0 && <div style={{ color: COL.warn }}>Nicht erkannt: {waInfo.unbekannt.join(" · ")}</div>}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="flex flex-col">
+          {sichtbar.map((s, i) => {
+            const q = items[s.id] || 0;
+            return (
+              <div key={s.id} className="flex items-center justify-between gap-2 py-2" style={{ borderTop: i ? `1px solid ${COL.line}` : "none" }}>
+                <div className="min-w-0">
+                  <div className="font-medium truncate" style={{ color: q > 0 ? COL.ink : COL.inkMuted }}>{s.kurz} <span className="text-xs font-normal" style={{ color: COL.inkMuted }}>{s.name !== s.kurz ? s.name : ""}</span></div>
+                  <div className="text-xs" style={{ color: COL.inkMuted }}>{Number(s.preis) > 0 ? fmtEUR(Number(s.preis)) : "Preis fehlt"}{q > 0 && Number(s.preis) > 0 ? ` · ${fmtEUR(q * s.preis)}` : ""}</div>
+                </div>
+                <Stepper value={q} halbe={s.halbe} onChange={(v) => setItems({ ...items, [s.id]: v })} />
+              </div>
+            );
+          })}
+          <button onClick={() => setAlleSorten(!alleSorten)} className="text-xs mt-1 text-left" style={{ color: COL.accent }}>
+            {alleSorten ? "Nur aktive Sorten zeigen" : `+ Weitere Sorten (${sorten.filter((s) => !s.aktiv).length})`}
+          </button>
+        </div>
+
+        <Field label="Notiz (optional)">
+          <textarea style={{ ...inputStyle, minHeight: 50 }} value={notiz} onChange={(e) => setNotiz(e.target.value)} placeholder="z.B. geschnitten, holt selbst ab …" />
+        </Field>
+
+        <div className="flex items-center justify-between gap-2 pt-1">
+          <div className="text-lg font-semibold" style={{ fontFamily: "'Fraunces', serif" }}>{fmtEUR(summe)}</div>
+          <div className="flex gap-2">
+            <Btn onClick={onCancel}>Abbrechen</Btn>
+            <Btn primary onClick={speichern}>Speichern</Btn>
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function BestellungenTab({ backtag, sorten, kunden, updateBacktag, addKunde, letzteBestellung }) {
+  const [editor, setEditor] = useState(null); // null | {} | bestellung
+  const [suche, setSuche] = useState("");
+  const kName = (id) => kunden.find((k) => k.id === id)?.name || "(unbekannt)";
+  const liste = (backtag.bestellungen || [])
+    .filter((b) => !suche || kName(b.kundeId).toLowerCase().includes(suche.toLowerCase()))
+    .sort((a, b) => kName(a.kundeId).localeCompare(kName(b.kundeId), "de"));
+
+  const save = (b) => {
+    updateBacktag((bt) => {
+      const exists = bt.bestellungen.some((x) => x.id === b.id);
+      // gleicher Kunde zweimal am selben Backtag? -> zusammenführen
+      const doppelt = !exists && bt.bestellungen.find((x) => x.kundeId === b.kundeId);
+      if (doppelt) {
+        if (window.confirm(`${kName(b.kundeId)} hat schon eine Bestellung. Zusammenführen?`)) {
+          const items = { ...doppelt.items };
+          Object.entries(b.items).forEach(([sid, q]) => (items[sid] = (items[sid] || 0) + q));
+          return { ...bt, bestellungen: bt.bestellungen.map((x) => (x.id === doppelt.id ? { ...x, items, notiz: [x.notiz, b.notiz].filter(Boolean).join(" · ") } : x)) };
+        }
+      }
+      return { ...bt, bestellungen: exists ? bt.bestellungen.map((x) => (x.id === b.id ? b : x)) : [...bt.bestellungen, { ...b, erfasst: new Date().toISOString() }] };
+    });
+    setEditor(null);
+  };
+  const remove = (b) => {
+    if (!window.confirm(`Bestellung von ${kName(b.kundeId)} löschen?`)) return;
+    updateBacktag((bt) => ({ ...bt, bestellungen: bt.bestellungen.filter((x) => x.id !== b.id) }));
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      {editor ? (
+        <BestellEditor
+          start={editor.id ? { ...editor, kundeName: kName(editor.kundeId) } : null}
+          sorten={sorten}
+          kunden={kunden}
+          letzteBestellung={letzteBestellung}
+          onSave={save}
+          onCancel={() => setEditor(null)}
+          onNeuerKunde={addKunde}
+        />
+      ) : (
+        <button
+          onClick={() => setEditor({})}
+          className="w-full flex items-center justify-center gap-2 text-base font-semibold py-4 rounded-2xl"
+          style={{ backgroundColor: COL.accent, color: "#fff", boxShadow: "0 4px 14px rgba(196,98,45,0.35)" }}
+        >
+          <IcPlus size={20} /> Bestellung eintragen
+        </button>
+      )}
+
+      {(backtag.bestellungen || []).length > 4 && (
+        <input style={inputStyle} placeholder="🔍 Kunde suchen …" value={suche} onChange={(e) => setSuche(e.target.value)} />
+      )}
+
+      {(backtag.bestellungen || []).length === 0 ? (
+        <Card><p className="text-sm text-center py-8" style={{ color: COL.inkMuted }}>🥖 Noch keine Bestellungen für {fmtDatum(backtag.datum)}.</p></Card>
+      ) : (
+        liste.map((b) => (
+          <Card key={b.id} className="!p-3.5">
+            <div className="flex items-start justify-between gap-2">
+              <button className="text-left flex-1 min-w-0" onClick={() => setEditor(b)}>
+                <div className="font-semibold flex items-center gap-1.5">
+                  {kName(b.kundeId)}
+                  <span className="text-xs">{b.quelle === "whatsapp" ? "💬" : "✍️"}</span>
+                </div>
+                <div className="text-sm mt-0.5" style={{ color: COL.inkMuted }}>{bestellText(b, sorten)}</div>
+                {b.notiz && <div className="text-xs mt-1 truncate" style={{ color: COL.amber }}>📝 {b.notiz}</div>}
+              </button>
+              <div className="flex flex-col items-end gap-1.5">
+                <div className="font-semibold" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtEUR(bestellSumme(b, sorten))}</div>
+                <div className="flex gap-1">
+                  <button onClick={() => setEditor(b)} className="p-1.5 rounded-lg" style={{ color: COL.inkMuted }} aria-label="Bearbeiten"><IcEdit size={15} /></button>
+                  <button onClick={() => remove(b)} className="p-1.5 rounded-lg" style={{ color: COL.warn }} aria-label="Löschen"><IcTrash size={15} /></button>
+                </div>
+              </div>
+            </div>
+          </Card>
+        ))
+      )}
+    </div>
+  );
+}
+
+// ---------- Backzettel ----------
+function BackzettelTab({ backtag, sorten, lager, onUebergeben, onReloadLager }) {
+  const bz = useMemo(() => berechneBackzettel(backtag, sorten, lager), [backtag, sorten, lager]);
+  const [offen, setOffen] = useState({});
+  const umsatz = (backtag.bestellungen || []).reduce((s, b) => s + bestellSumme(b, sorten), 0);
+  const matName = (id) => lager?.materials?.find((m) => m.id === id)?.name || "?";
+
+  if (!lager) {
+    return <Card><p className="text-sm" style={{ color: COL.warn }}>Rezepte aus der Lager-App konnten nicht geladen werden. <button className="underline" onClick={onReloadLager}>Nochmal versuchen</button></p></Card>;
+  }
+  if (bz.proSorte.length === 0) {
+    return <Card><p className="text-sm text-center py-8" style={{ color: COL.inkMuted }}>📋 Der Backzettel entsteht automatisch, sobald Bestellungen eingetragen sind.</p></Card>;
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="print-only text-xl font-bold" style={{ fontFamily: "'Fraunces', serif" }}>Backzettel {fmtDatum(backtag.datum)}</div>
+
+      <div className="grid grid-cols-3 gap-2">
+        {[["🥖", fmtNum(bz.stueckGesamt), "Stück"], ["⚖️", fmtG(bz.teigGesamt), "Teig"], ["💶", fmtEUR(umsatz), "Umsatz"]].map(([e, v, l]) => (
+          <Card key={l} className="!p-3 text-center">
+            <div className="text-lg">{e}</div>
+            <div className="font-semibold text-base sm:text-lg leading-tight" style={{ fontFamily: "'Fraunces', serif" }}>{v}</div>
+            <div className="text-xs" style={{ color: COL.inkMuted }}>{l}</div>
+          </Card>
+        ))}
+      </div>
+
+      {bz.fehlend.length > 0 && (
+        <div className="text-sm px-4 py-3 rounded-2xl no-print" style={{ backgroundColor: COL.warnSoft, color: COL.warn }}>
+          ⚠️ Ohne Rezept (fehlen im Teig): <b>{bz.fehlend.map((s) => s.kurz).join(", ")}</b>. Unter Einstellungen → Sorten ein Rezept zuordnen.
+        </div>
+      )}
+
+      <Card>
+        <H2>🥖 Stück pro Sorte</H2>
+        <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${COL.line}` }}>
+          {bz.proSorte.map(({ sorte, stueck }, i) => (
+            <div key={sorte.id} className="flex items-center justify-between px-3 py-2.5" style={{ backgroundColor: i % 2 ? COL.bg : COL.surface }}>
+              <span className="font-medium">{sorte.kurz} <span className="text-xs font-normal" style={{ color: COL.inkMuted }}>{sorte.name !== sorte.kurz ? sorte.name : ""}</span></span>
+              <span className="text-lg font-bold" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtQty(stueck)}</span>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {bz.vorstufen.length > 0 && (
+        <Card style={{ border: `2px solid ${COL.wheat}` }}>
+          <H2>🫙 Vorstufen ansetzen</H2>
+          <p className="text-xs -mt-2 mb-3" style={{ color: COL.inkMuted }}>Gesamtmenge für alle Teige zusammen</p>
+          <div className="flex flex-col gap-2">
+            {bz.vorstufen.map((v) => (
+              <div key={v.name} className="rounded-xl p-3" style={{ backgroundColor: COL.amberSoft }}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold">{v.name}</span>
+                  <span className="text-lg font-bold" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtG(v.menge)}</span>
+                </div>
+                {v.teile.length > 0 && (
+                  <div className="text-sm mt-1" style={{ color: COL.amber }}>
+                    = {v.teile.map((t) => `${fmtG(t.menge)} ${t.mat?.name || "?"}`).join(" + ")}
+                  </div>
+                )}
+                <div className="text-xs mt-0.5" style={{ color: COL.inkMuted }}>für {v.fuer.join(", ")}</div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      <Card>
+        <H2>🍞 Teige</H2>
+        <div className="flex flex-col gap-2">
+          {bz.teige.map((t) => {
+            const auf = offen[t.rezept.name] ?? true;
+            let letzteGruppe = null;
+            return (
+              <div key={t.rezept.name} className="rounded-xl print-card" style={{ border: `1px solid ${COL.line}` }}>
+                <button className="w-full text-left p-3 flex items-center justify-between gap-2" onClick={() => setOffen({ ...offen, [t.rezept.name]: !auf })}>
+                  <div>
+                    <div className="font-semibold" style={{ fontFamily: "'Fraunces', serif" }}>{t.rezept.name}</div>
+                    <div className="text-xs" style={{ color: COL.inkMuted }}>
+                      {t.sorten.map((s) => `${fmtQty(s.stueck)}× ${s.kurz} à ${fmtG(s.g)}`).join(" · ")} · Faktor ×{fmtNum(t.faktor, 2)}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-bold" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtG(t.teigG)}</div>
+                    <div className="text-xs no-print" style={{ color: COL.inkMuted }}>{auf ? "▾" : "▸"}</div>
+                  </div>
+                </button>
+                {auf && (
+                  <div className="px-3 pb-3">
+                    {t.items.map((it, i) => {
+                      const kopf = it.gruppe && it.gruppe !== letzteGruppe ? it.gruppe : null;
+                      letzteGruppe = it.gruppe || null;
+                      return (
+                        <React.Fragment key={i}>
+                          {kopf && <div className="text-xs font-semibold uppercase mt-2 mb-1" style={{ color: COL.accent, letterSpacing: "0.06em" }}>{kopf}</div>}
+                          <div className="flex justify-between text-sm py-1" style={{ borderTop: i && !kopf ? `1px dashed ${COL.line}` : "none" }}>
+                            <span>{matName(it.materialId)}</span>
+                            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600 }}>{fmtG(it.menge)}</span>
+                          </div>
+                        </React.Fragment>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
+      <Card className="no-print">
+        <H2>📦 Rohstoffbedarf gesamt</H2>
+        <p className="text-xs -mt-2 mb-3" style={{ color: COL.inkMuted }}>Sauerteig & Kochstücke sind hier schon in Mehl und Wasser aufgelöst – so wird es im Lager abgebucht.</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6">
+          {bz.rohstoffe.map((r) => {
+            const knapp = r.mat.stock < r.menge;
+            return (
+              <div key={r.materialId} className="flex justify-between text-sm py-1.5" style={{ borderBottom: `1px dashed ${COL.line}` }}>
+                <span>{r.mat.name}</span>
+                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, color: knapp ? COL.warn : COL.ink }} title={`Lagerstand: ${fmtG(r.mat.stock)}`}>
+                  {fmtG(r.menge)} {knapp ? "⚠️" : ""}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        <p className="text-xs mt-2" style={{ color: COL.inkMuted }}>⚠️ = laut Lager-App nicht genug am Lager</p>
+      </Card>
+
+      <div className="flex flex-wrap gap-2 no-print">
+        <Btn onClick={() => window.print()}><IcPrint size={16} /> Drucken</Btn>
+        <Btn primary onClick={() => onUebergeben(bz)} disabled={!bz.rohstoffe.length}>
+          <IcSend size={16} /> {backtag.lagerUebergeben ? "Nochmal an Lager-App senden" : "An Lager-App übergeben"}
+        </Btn>
+      </div>
+      {backtag.lagerUebergeben && (
+        <div className="text-sm no-print" style={{ color: COL.ok }}>✅ Am {new Date(backtag.lagerUebergeben).toLocaleString("de-DE")} an die Lager-App übergeben.</div>
+      )}
+    </div>
+  );
+}
+
+// ---------- Kunden & Kassa ----------
+function KassaTab({ backtag, sorten, kunden, updateBacktag }) {
+  const kName = (id) => kunden.find((k) => k.id === id)?.name || "(unbekannt)";
+  const liste = [...(backtag.bestellungen || [])].sort((a, b) => kName(a.kundeId).localeCompare(kName(b.kundeId), "de"));
+  const gesamt = liste.reduce((s, b) => s + bestellSumme(b, sorten), 0);
+  const bezahlt = liste.filter((b) => b.bezahlt).reduce((s, b) => s + bestellSumme(b, sorten), 0);
+  const toggle = (b) => updateBacktag((bt) => ({ ...bt, bestellungen: bt.bestellungen.map((x) => (x.id === b.id ? { ...x, bezahlt: !x.bezahlt } : x)) }));
+
+  const waLink = (b) => {
+    const zeilen = sorten.filter((s) => (b.items[s.id] || 0) > 0).map((s) => `${fmtQty(b.items[s.id])}× ${s.name} (${fmtEUR(b.items[s.id] * s.preis)})`);
+    const text = `Hallo ${kName(b.kundeId).split(" ")[0]}! 🍞\nDeine Bestellung für ${fmtDatum(backtag.datum)}:\n${zeilen.join("\n")}\nGesamt: ${fmtEUR(bestellSumme(b, sorten))}\n\nLiebe Grüße, Börni's Backstube`;
+    return `https://wa.me/?text=${encodeURIComponent(text)}`;
+  };
+
+  if (!liste.length) return <Card><p className="text-sm text-center py-8" style={{ color: COL.inkMuted }}>👥 Noch keine Bestellungen.</p></Card>;
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="print-only text-xl font-bold" style={{ fontFamily: "'Fraunces', serif" }}>Lieferliste {fmtDatum(backtag.datum)}</div>
+      <Card className="!p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-xs" style={{ color: COL.inkMuted }}>Gesamt · {liste.length} Kunden</div>
+            <div className="text-2xl font-semibold" style={{ fontFamily: "'Fraunces', serif" }}>{fmtEUR(gesamt)}</div>
+          </div>
+          <div className="text-right text-sm">
+            <div style={{ color: COL.ok }}>✅ bezahlt {fmtEUR(bezahlt)}</div>
+            <div style={{ color: COL.warn }}>⏳ offen {fmtEUR(gesamt - bezahlt)}</div>
+          </div>
+        </div>
+        <div className="h-2 rounded-full mt-3 overflow-hidden" style={{ backgroundColor: COL.warnSoft }}>
+          <div className="h-full rounded-full" style={{ width: `${gesamt ? (bezahlt / gesamt) * 100 : 0}%`, backgroundColor: COL.ok, transition: "width .3s" }} />
+        </div>
+      </Card>
+
+      {liste.map((b) => (
+        <Card key={b.id} className="!p-3.5" style={{ opacity: b.bezahlt ? 0.7 : 1 }}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="font-semibold">{kName(b.kundeId)}</div>
+              <div className="text-sm mt-1 flex flex-col">
+                {sorten.filter((s) => (b.items[s.id] || 0) > 0).map((s) => (
+                  <span key={s.id}>
+                    <b style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtQty(b.items[s.id])}×</b> {s.name}{" "}
+                    <span style={{ color: COL.inkMuted }}>{Number(s.preis) > 0 ? fmtEUR(b.items[s.id] * s.preis) : "(Preis fehlt)"}</span>
+                  </span>
+                ))}
+              </div>
+              {b.notiz && <div className="text-xs mt-1 truncate" style={{ color: COL.amber, maxWidth: "100%" }}>📝 {b.notiz}</div>}
+            </div>
+            <div className="flex flex-col items-end gap-2">
+              <div className="text-lg font-bold" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtEUR(bestellSumme(b, sorten))}</div>
+              <button onClick={() => toggle(b)} className="text-xs font-semibold px-2.5 py-1.5 rounded-full" style={{ backgroundColor: b.bezahlt ? COL.okSoft : COL.warnSoft, color: b.bezahlt ? COL.ok : COL.warn }}>
+                {b.bezahlt ? "✅ bezahlt" : "⏳ offen"}
+              </button>
+              <a href={waLink(b)} target="_blank" rel="noopener" className="text-xs no-print" style={{ color: "#1F7A3A" }}>💬 per WhatsApp</a>
+            </div>
+          </div>
+        </Card>
+      ))}
+      <div className="no-print"><Btn onClick={() => window.print()}><IcPrint size={16} /> Liste drucken</Btn></div>
+    </div>
+  );
+}
+
+// ---------- Einstellungen ----------
+function EinstellungenTab({ daten, setDaten, lager, config, onReloadLager, onDisconnect }) {
+  const [bereich, setBereich] = useState("sorten");
+  const [neueKunden, setNeueKunden] = useState("");
+  const [zeigeLink, setZeigeLink] = useState(false);
+  const rezepte = [...(lager?.recipes || [])].sort((a, b) => a.name.localeCompare(b.name, "de"));
+  const setSorten = (fn) => setDaten((d) => ({ ...d, sorten: fn(d.sorten) }));
+  const upd = (id, patch) => setSorten((ss) => ss.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+  const move = (idx, dir) =>
+    setSorten((ss) => {
+      const n = [...ss];
+      const j = idx + dir;
+      if (j < 0 || j >= n.length) return n;
+      [n[idx], n[j]] = [n[j], n[idx]];
+      return n;
+    });
+
+  const kundenHinzu = () => {
+    const namen = neueKunden.split(/\n/).map((x) => x.trim()).filter(Boolean);
+    setDaten((d) => {
+      const vorhanden = new Set(d.kunden.map((k) => k.name.trim().toLowerCase()));
+      const neu = namen.filter((n) => !vorhanden.has(n.toLowerCase())).map((name) => ({ id: uid(), name }));
+      return { ...d, kunden: [...d.kunden, ...neu] };
+    });
+    setNeueKunden("");
+  };
+  const benutzteKunden = new Set(daten.backtage.flatMap((bt) => bt.bestellungen.map((b) => b.kundeId)));
+  const groesse = new Blob([JSON.stringify(daten)]).size;
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex gap-1 p-1 rounded-xl" style={{ backgroundColor: COL.surface, border: `1px solid ${COL.line}` }}>
+        {[["sorten", "🥖 Sorten"], ["kunden", "👥 Kunden"], ["app", "⚙️ App"]].map(([k, l]) => (
+          <button key={k} onClick={() => setBereich(k)} className="flex-1 text-sm py-2 rounded-lg" style={{ backgroundColor: bereich === k ? COL.accent : "transparent", color: bereich === k ? "#fff" : COL.ink }}>{l}</button>
+        ))}
+      </div>
+
+      {bereich === "sorten" && (
+        <>
+          <p className="text-sm" style={{ color: COL.inkMuted }}>
+            Für jede Sorte: welches Rezept aus der Lager-App, wie schwer ein Stück ist (leer = aus dem Rezept) und der Verkaufspreis. „Extra“ ist z.B. eine Füllung oder ein Topping mit eigenem Rezept.
+          </p>
+          {daten.sorten.map((s, idx) => {
+            const rez = findRezept(lager?.recipes || [], s.rezept);
+            const auto = rez ? gProStueck({ gProStueck: "" }, rez) : 0;
+            return (
+              <Card key={s.id} className="!p-3.5" style={{ opacity: s.aktiv ? 1 : 0.6 }}>
+                <div className="flex items-center gap-2 mb-2">
+                  <input style={{ ...inputStyle, width: 90, fontWeight: 600 }} value={s.kurz} onChange={(e) => upd(s.id, { kurz: e.target.value })} aria-label="Kürzel" />
+                  <input style={{ ...inputStyle, flex: 1 }} value={s.name} onChange={(e) => upd(s.id, { name: e.target.value })} aria-label="Name" />
+                  <div className="flex flex-col">
+                    <button onClick={() => move(idx, -1)} className="text-xs px-1" style={{ color: COL.inkMuted }} aria-label="nach oben">▲</button>
+                    <button onClick={() => move(idx, 1)} className="text-xs px-1" style={{ color: COL.inkMuted }} aria-label="nach unten">▼</button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div className="col-span-2">
+                    <Field label="Rezept">
+                      <select style={{ ...inputStyle, borderColor: rez ? COL.line : COL.warn }} value={rez ? rez.name : ""} onChange={(e) => upd(s.id, { rezept: e.target.value })}>
+                        <option value="">– bitte wählen –</option>
+                        {rezepte.map((r) => <option key={r.id} value={r.name}>{r.name}</option>)}
+                      </select>
+                    </Field>
+                  </div>
+                  <Field label="g pro Stück">
+                    <input style={inputStyle} inputMode="decimal" value={s.gProStueck ?? ""} onChange={(e) => upd(s.id, { gProStueck: e.target.value })} placeholder={auto ? `${Math.round(auto)} (Rezept)` : "z.B. 100"} />
+                  </Field>
+                  <Field label="Preis €">
+                    <input style={{ ...inputStyle, borderColor: Number(s.preis) > 0 ? COL.line : COL.amber }} inputMode="decimal" value={s.preis ?? ""} onChange={(e) => upd(s.id, { preis: e.target.value.replace(",", ".") })} />
+                  </Field>
+                </div>
+                {(s.extras || []).map((x, xi) => (
+                  <div key={xi} className="flex items-end gap-2 mt-2">
+                    <div className="flex-1">
+                      <Field label="Extra-Rezept (Füllung, Topping …)">
+                        <select style={inputStyle} value={x.rezept} onChange={(e) => upd(s.id, { extras: s.extras.map((y, yi) => (yi === xi ? { ...y, rezept: e.target.value } : y)) })}>
+                          <option value="">– wählen –</option>
+                          {rezepte.map((r) => <option key={r.id} value={r.name}>{r.name}</option>)}
+                        </select>
+                      </Field>
+                    </div>
+                    <div style={{ width: 90 }}>
+                      <Field label="g/Stück">
+                        <input style={inputStyle} inputMode="decimal" value={x.g} onChange={(e) => upd(s.id, { extras: s.extras.map((y, yi) => (yi === xi ? { ...y, g: e.target.value } : y)) })} />
+                      </Field>
+                    </div>
+                    <button className="pb-3" style={{ color: COL.warn }} onClick={() => upd(s.id, { extras: s.extras.filter((_, yi) => yi !== xi) })} aria-label="Extra entfernen"><IcX size={16} /></button>
+                  </div>
+                ))}
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3 text-sm">
+                  <label className="flex items-center gap-1.5"><input type="checkbox" checked={s.aktiv} onChange={(e) => upd(s.id, { aktiv: e.target.checked })} /> aktiv</label>
+                  <label className="flex items-center gap-1.5"><input type="checkbox" checked={!!s.halbe} onChange={(e) => upd(s.id, { halbe: e.target.checked })} /> halbe möglich</label>
+                  <button style={{ color: COL.accent }} onClick={() => upd(s.id, { extras: [...(s.extras || []), { rezept: "", g: "" }] })}>+ Extra</button>
+                  <button style={{ color: COL.warn }} className="ml-auto" onClick={() => window.confirm(`Sorte „${s.kurz}“ löschen?`) && setSorten((ss) => ss.filter((x) => x.id !== s.id))}>Löschen</button>
+                </div>
+                <div className="mt-2">
+                  <Field label="Andere Schreibweisen für WhatsApp (mit Komma)">
+                    <input style={{ ...inputStyle, fontSize: 13 }} value={s.aliases || ""} onChange={(e) => upd(s.id, { aliases: e.target.value })} />
+                  </Field>
+                </div>
+              </Card>
+            );
+          })}
+          <Btn onClick={() => setSorten((ss) => [...ss, { id: uid(), kurz: "Neu", name: "Neue Sorte", rezept: "", gProStueck: "", preis: 0, extras: [], aktiv: true, halbe: false, aliases: "" }])}>
+            <IcPlus size={16} /> Neue Sorte
+          </Btn>
+        </>
+      )}
+
+      {bereich === "kunden" && (
+        <>
+          <Card>
+            <H2>Kunden hinzufügen</H2>
+            <textarea style={{ ...inputStyle, width: "100%", minHeight: 90 }} value={neueKunden} onChange={(e) => setNeueKunden(e.target.value)} placeholder={"Ein Name pro Zeile – du kannst auch deine ganze Liste aus Excel hineinkopieren."} />
+            <div className="mt-2"><Btn primary onClick={kundenHinzu} disabled={!neueKunden.trim()}>Hinzufügen</Btn></div>
+          </Card>
+          <Card>
+            <H2>{daten.kunden.length} Kunden</H2>
+            <div className="flex flex-col">
+              {[...daten.kunden].sort((a, b) => a.name.localeCompare(b.name, "de")).map((k, i) => (
+                <div key={k.id} className="flex items-center gap-2 py-1.5" style={{ borderTop: i ? `1px solid ${COL.line}` : "none" }}>
+                  <input style={{ ...inputStyle, flex: 1, padding: "6px 9px", fontSize: 14 }} value={k.name} onChange={(e) => setDaten((d) => ({ ...d, kunden: d.kunden.map((x) => (x.id === k.id ? { ...x, name: e.target.value } : x)) }))} />
+                  <button
+                    style={{ color: benutzteKunden.has(k.id) ? COL.line : COL.warn }}
+                    disabled={benutzteKunden.has(k.id)}
+                    title={benutzteKunden.has(k.id) ? "Hat Bestellungen – kann nicht gelöscht werden" : "Löschen"}
+                    onClick={() => window.confirm(`${k.name} löschen?`) && setDaten((d) => ({ ...d, kunden: d.kunden.filter((x) => x.id !== k.id) }))}
+                  >
+                    <IcTrash size={15} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </>
+      )}
+
+      {bereich === "app" && (
+        <Card>
+          <div className="flex flex-col gap-3 text-sm">
+            <div>📖 Aus der Lager-App geladen: <b>{lager?.recipes?.length || 0} Rezepte</b>, <b>{lager?.materials?.length || 0} Rohstoffe</b></div>
+            <Btn onClick={onReloadLager}>🔄 Rezepte & Lagerstand neu laden</Btn>
+            <div>💾 Speicher belegt: <b>{fmtNum(groesse / 1024)} kb</b> von 100 kb (die letzten {MAX_BACKTAGE} Backtage werden aufgehoben)</div>
+            <Btn onClick={() => setZeigeLink(!zeigeLink)}>📱 Neues Gerät einrichten</Btn>
+            {zeigeLink && (
+              <div className="flex flex-col items-center gap-2">
+                <img src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(makeSetupUrl(config))}`} width={220} height={220} alt="QR-Code" style={{ borderRadius: 8, border: `1px solid ${COL.line}` }} />
+                <input readOnly value={makeSetupUrl(config)} onFocus={(e) => e.target.select()} style={{ ...inputStyle, width: "100%", fontSize: 11, fontFamily: "'IBM Plex Mono', monospace" }} />
+                <p className="text-xs text-center" style={{ color: COL.warn }}>Achtung: Wer diesen Link hat, kann auf deine Daten zugreifen – nur mit eigenen Geräten teilen.</p>
+              </div>
+            )}
+            <a href={LAGER_APP_URL} className="underline" style={{ color: COL.accent }}>→ Zur Lager-App</a>
+            <Btn danger onClick={onDisconnect}>Verbindung auf diesem Gerät trennen</Btn>
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ---------- Haupt-App ----------
+const TABS = [
+  { key: "bestellungen", label: "Bestellungen", icon: IcList },
+  { key: "backzettel", label: "Backzettel", icon: IcBread },
+  { key: "kassa", label: "Kunden & €", icon: IcUsers },
+  { key: "einstellungen", label: "Einstellungen", icon: IcGear },
+];
+
+function App() {
+  const [config, setConfig] = useState(() => getConfig());
+  const [daten, setDaten] = useState(leereDaten);
+  const [lager, setLager] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState("bestellungen");
+  const [backtagId, setBacktagId] = useState(null);
+  const [sync, setSync] = useState("idle");
+  const [syncFehler, setSyncFehler] = useState("");
+  const [neuDatum, setNeuDatum] = useState(null); // offenes Datumsfeld für neuen Backtag
+  const loadedRef = useRef(false);
+  const dirtyRef = useRef(false);
+  const skipSaveRef = useRef(false);
+
+  const ladeLager = async (c = config) => {
+    try {
+      const rec = await binRead(c.apiKey, c.lagerBin);
+      setLager({ recipes: rec.recipes || [], materials: rec.materials || [] });
+    } catch (e) {
+      setLager(null);
+    }
+  };
+  const ladeDaten = async (c = config) => {
+    const rec = await binRead(c.apiKey, c.bestellBin);
+    const d = { ...leereDaten(), ...rec };
+    if (!d.sorten?.length) d.sorten = STANDARD_SORTEN;
+    return d;
+  };
+
+  useEffect(() => {
+    if (!config) { setLoading(false); return; }
+    (async () => {
+      try {
+        const [d] = await Promise.all([ladeDaten(), ladeLager()]);
+        setDaten(d);
+        const kommend = [...d.backtage].sort((a, b) => a.datum.localeCompare(b.datum)).find((b) => b.datum >= isoHeute());
+        setBacktagId((kommend || d.backtage[d.backtage.length - 1])?.id || null);
+      } catch (e) {
+        setSync("error");
+        setSyncFehler(e.message);
+      } finally {
+        loadedRef.current = true;
+        setLoading(false);
+      }
+    })();
+  }, [config]);
+
+  // Automatisch speichern
+  useEffect(() => {
+    if (!config || !loadedRef.current) return;
+    if (skipSaveRef.current) {
+      skipSaveRef.current = false;
+      return;
+    }
+    dirtyRef.current = true;
+    setSync("saving");
+    const t = setTimeout(async () => {
+      try {
+        const sortiert = [...daten.backtage].sort((a, b) => b.datum.localeCompare(a.datum)).slice(0, MAX_BACKTAGE);
+        await binWrite(config.apiKey, config.bestellBin, { ...daten, backtage: sortiert });
+        dirtyRef.current = false;
+        setSync("saved");
+        setSyncFehler("");
+      } catch (e) {
+        setSync("error");
+        setSyncFehler(e.message);
+      }
+    }, 900);
+    return () => clearTimeout(t);
+  }, [daten]);
+
+  // Beim Zurückkehren in die App: Änderungen vom anderen Gerät holen (nur wenn hier nichts ungespeichert ist)
+  useEffect(() => {
+    const onVis = async () => {
+      if (document.visibilityState !== "visible" || !config || dirtyRef.current || !loadedRef.current) return;
+      try {
+        const d = await ladeDaten();
+        skipSaveRef.current = true;
+        setDaten(d);
+        ladeLager();
+      } catch (e) {}
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [config]);
+
+  if (!config) return <SetupScreen onReady={() => setConfig(getConfig())} />;
+  if (loading) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4" style={{ backgroundColor: COL.bg, fontFamily: "'IBM Plex Sans', sans-serif", color: COL.inkMuted }}>
+        <div style={{ fontSize: 56, animation: "rise 1.6s ease-in-out infinite" }}>🧾</div>
+        <Brand small />
+        <div className="text-sm">Bestellungen werden geholt …</div>
+      </div>
+    );
+  }
+
+  const backtage = [...daten.backtage].sort((a, b) => a.datum.localeCompare(b.datum));
+  const backtag = daten.backtage.find((b) => b.id === backtagId) || null;
+
+  const neuerBacktag = () => {
+    const letzter = backtage[backtage.length - 1];
+    const vorschlag = letzter && letzter.datum >= isoHeute() ? plusTage(letzter.datum, 7) : isoHeute();
+    setNeuDatum(vorschlag);
+  };
+  const backtagAnlegen = (datum) => {
+    setNeuDatum(null);
+    if (!datum || !/^\d{4}-\d{2}-\d{2}$/.test(datum)) return;
+    const vorhanden = daten.backtage.find((b) => b.datum === datum);
+    if (vorhanden) { setBacktagId(vorhanden.id); return; }
+    const bt = { id: uid(), datum, bestellungen: [], lagerUebergeben: null };
+    setDaten((d) => ({ ...d, backtage: [...d.backtage, bt] }));
+    setBacktagId(bt.id);
+    setTab("bestellungen");
+  };
+  const updateBacktag = (fn) => setDaten((d) => ({ ...d, backtage: d.backtage.map((b) => (b.id === backtagId ? fn(b) : b)) }));
+  const addKunde = (name) => {
+    const k = { id: uid(), name };
+    setDaten((d) => ({ ...d, kunden: [...d.kunden, k] }));
+    return k;
+  };
+  const letzteBestellung = (kundeId) => {
+    const frueher = [...daten.backtage].filter((b) => b.id !== backtagId).sort((a, b) => b.datum.localeCompare(a.datum));
+    for (const bt of frueher) {
+      const b = bt.bestellungen.find((x) => x.kundeId === kundeId);
+      if (b) return b;
+    }
+    return null;
+  };
+
+  const uebergeben = (bz) => {
+    const payload = {
+      id: `bestellapp-${backtag.id}`,
+      label: `Backzettel ${fmtDatum(backtag.datum)} (Bestell-App)`,
+      items: bz.rohstoffe.map((r) => ({ materialId: r.materialId, needed: Math.round(r.menge * 10) / 10, name: r.mat.name })),
+    };
+    if (backtag.lagerUebergeben && !window.confirm("Dieser Backzettel wurde schon übergeben. Die Lager-App ersetzt dann den alten Abzug durch den neuen. Weiter?")) return;
+    updateBacktag((bt) => ({ ...bt, lagerUebergeben: new Date().toISOString() }));
+    const url = `${LAGER_APP_URL}#backzettel=${encodeURIComponent(JSON.stringify(payload))}`;
+    setTimeout(() => (window.location.href = url), 1200); // kurz warten, damit gespeichert wird
+  };
+
+  const disconnect = () => {
+    if (!window.confirm("Verbindung auf diesem Gerät trennen? Deine Daten bleiben online erhalten.")) return;
+    localStorage.removeItem("bestellapp_config");
+    window.location.reload();
+  };
+
+  const offen = backtag ? backtag.bestellungen.filter((b) => !b.bezahlt).length : 0;
+
+  return (
+    <div className="min-h-screen w-full" style={{ backgroundColor: COL.bg, fontFamily: "'IBM Plex Sans', sans-serif", color: COL.ink }}>
+      <div className="max-w-3xl mx-auto px-4 pt-4 pb-28 sm:pb-10">
+        <header className="mb-4 no-print">
+          <div className="relative rounded-3xl px-5 py-4" style={{ background: `radial-gradient(circle at 85% 20%, rgba(232,182,76,0.28), transparent 45%), linear-gradient(135deg, ${COL.crust} 0%, #5A3A24 100%)`, boxShadow: "0 10px 30px rgba(59,42,30,0.25)" }}>
+            <div className="flex items-center justify-between gap-2">
+              <Brand light small />
+              <span className="text-xs px-2.5 py-1 rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.1)", color: sync === "error" ? "#FFD2C2" : "rgba(255,255,255,0.75)" }} title={syncFehler}>
+                {sync === "saving" ? "speichert …" : sync === "saved" ? "✓ gespeichert" : sync === "error" ? "⚠ nicht gespeichert" : "bereit"}
+              </span>
+            </div>
+            <div className="mt-3 text-white text-lg" style={{ fontFamily: "'Fraunces', serif", fontWeight: 600 }}>Bestellungen 🧾</div>
+            <div className="flex items-center gap-2 mt-2">
+              <select
+                value={backtagId || ""}
+                onChange={(e) => setBacktagId(e.target.value)}
+                className="flex-1"
+                style={{ ...inputStyle, backgroundColor: "rgba(255,255,255,0.12)", color: "#fff", border: "1px solid rgba(255,255,255,0.25)", fontWeight: 600 }}
+              >
+                {!backtag && <option value="" style={{ color: COL.ink }}>– Backtag wählen –</option>}
+                {backtage.map((b) => (
+                  <option key={b.id} value={b.id} style={{ color: COL.ink }}>
+                    🗓 {fmtDatum(b.datum)} · {b.bestellungen.length} Best.
+                  </option>
+                ))}
+              </select>
+              <button onClick={neuerBacktag} className="text-sm font-semibold px-3 py-2.5 rounded-xl whitespace-nowrap" style={{ backgroundColor: COL.wheat, color: COL.crust }}>+ Backtag</button>
+            </div>
+            {neuDatum !== null && (
+              <div className="flex flex-wrap items-center gap-2 mt-2 p-2 rounded-xl" style={{ backgroundColor: "rgba(255,255,255,0.1)", animation: "fadeIn .2s ease" }}>
+                <span className="text-sm text-white">Neuer Backtag am</span>
+                <input type="date" value={neuDatum} onChange={(e) => setNeuDatum(e.target.value)} style={{ ...inputStyle, padding: "6px 8px" }} aria-label="Datum des Backtags" />
+                <button onClick={() => backtagAnlegen(neuDatum)} className="text-sm font-semibold px-3 py-2 rounded-xl" style={{ backgroundColor: COL.wheat, color: COL.crust }}>Anlegen</button>
+                <button onClick={() => setNeuDatum(null)} className="text-sm px-2 py-2" style={{ color: "rgba(255,255,255,0.8)" }}>Abbrechen</button>
+              </div>
+            )}
+          </div>
+        </header>
+
+        {sync === "error" && syncFehler && (
+          <div className="text-sm px-4 py-3 rounded-2xl mb-4 no-print" style={{ backgroundColor: COL.warnSoft, color: COL.warn }}>⚠️ Speichern fehlgeschlagen: {syncFehler}</div>
+        )}
+
+        <nav className="hidden sm:flex gap-1 mb-4 p-1 rounded-2xl w-fit no-print" style={{ backgroundColor: COL.surface, border: `1px solid ${COL.line}` }}>
+          {TABS.map((t) => {
+            const I = t.icon;
+            const on = tab === t.key;
+            return (
+              <button key={t.key} onClick={() => setTab(t.key)} className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-xl" style={{ backgroundColor: on ? COL.accent : "transparent", color: on ? "#fff" : COL.inkMuted }}>
+                <I size={16} /> {t.label}
+              </button>
+            );
+          })}
+        </nav>
+
+        {tab === "einstellungen" ? (
+          <EinstellungenTab daten={daten} setDaten={setDaten} lager={lager} config={config} onReloadLager={() => ladeLager()} onDisconnect={disconnect} />
+        ) : !backtag ? (
+          <Card>
+            <div className="text-center py-8">
+              <div className="text-4xl mb-2">🗓</div>
+              <p className="text-sm mb-4" style={{ color: COL.inkMuted }}>Leg zuerst einen Backtag an – dann kannst du Bestellungen eintragen.</p>
+              <Btn primary onClick={neuerBacktag}><IcPlus size={16} /> Backtag anlegen</Btn>
+            </div>
+          </Card>
+        ) : tab === "bestellungen" ? (
+          <BestellungenTab backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} updateBacktag={updateBacktag} addKunde={addKunde} letzteBestellung={letzteBestellung} />
+        ) : tab === "backzettel" ? (
+          <BackzettelTab backtag={backtag} sorten={daten.sorten} lager={lager} onUebergeben={uebergeben} onReloadLager={() => ladeLager()} />
+        ) : (
+          <KassaTab backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} updateBacktag={updateBacktag} />
+        )}
+
+        <nav className="sm:hidden bottom-nav no-print fixed bottom-0 left-0 right-0 z-20 flex justify-around px-2 pt-2" style={{ backgroundColor: "rgba(255,255,255,0.95)", backdropFilter: "blur(10px)", borderTop: `1px solid ${COL.line}` }}>
+          {TABS.map((t) => {
+            const I = t.icon;
+            const on = tab === t.key;
+            return (
+              <button key={t.key} onClick={() => { setTab(t.key); window.scrollTo({ top: 0 }); }} className="relative flex flex-col items-center gap-0.5 px-0.5 py-1 flex-1 min-w-0" style={{ color: on ? COL.accent : COL.inkMuted }}>
+                <span className="flex items-center justify-center rounded-full" style={{ width: 44, height: 28, backgroundColor: on ? COL.accentSoft : "transparent" }}>
+                  <I size={19} strokeWidth={on ? 2.4 : 2} />
+                </span>
+                <span className="text-[11px]" style={{ fontWeight: on ? 600 : 500 }}>{t.label}</span>
+                {t.key === "kassa" && offen > 0 && (
+                  <span className="absolute top-0 right-1/4 text-[10px] font-bold rounded-full px-1.5" style={{ backgroundColor: COL.accent, color: "#fff" }}>{offen}</span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+      </div>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+document.getElementById("root").dataset.rendered = "1";
+root.render(<App />);
+</script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('./sw.js').catch(function () {});
+    });
+  }
+</script>
+</body>
+</html>
