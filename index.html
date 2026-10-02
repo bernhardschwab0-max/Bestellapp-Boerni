@@ -300,10 +300,10 @@ const STANDARD_SORTEN = [
   { kurz: "Kn Cia", name: "Knoblauch-Ciabatta", rezept: "Knoblauch Dinkelciabatta", preis: 4.0, aliases: "knoblauch ciabatta, knoblauchciabatta, ciabatta, knobi" },
   { kurz: "Strizl", name: "Striezel", rezept: "", preis: 6.0, aliases: "striezel, brioche striezel" },
   { kurz: "Zimz", name: "Zimtschnecke", rezept: "", preis: 3.5, aliases: "zimt, zimtschnecke, zimtschnecken" },
-  { kurz: "Mohn", name: "Mohnkipferl", rezept: "Brioche", gProStueck: "80", extras: [{ rezept: "Mohnfülle", g: "80" }], preis: 0, aliases: "mohnkipferl, mohnflesserl" },
+  { kurz: "Mohn", name: "Mohnkipferl", rezept: "Brioche", gProStueck: "80", extras: [{ rezept: "Mohnfülle", g: "80" }], preis: 3.5, aliases: "mohnkipferl, mohnflesserl" },
   // Apfelfülle ohne Gewicht = 1 Portion aus dem Rezept pro Schnecke (56,9 g Fülle + Zimtzucker)
-  { kurz: "Apfel", name: "Apfelschnecke", rezept: "Brioche", gProStueck: "125", extras: [{ rezept: "Apfelfülle Zimtschnecken", g: "" }], preis: 0, aliases: "apfelschnecke, apfelschnecken, apfel schnecke, apfel-zimtschnecke" },
-  { kurz: "Kürbis", name: "Topfen-Kürbis", rezept: "Topfen-Kürbis", preis: 0, aktiv: false, aliases: "topfen kürbis, kürbisweckerl, topfen-kürbis" },
+  { kurz: "Apfel", name: "Apfelschnecke", rezept: "Brioche", gProStueck: "125", extras: [{ rezept: "Apfelfülle Zimtschnecken", g: "" }], preis: 3.5, aliases: "apfelschnecke, apfelschnecken, apfel schnecke, apfel-zimtschnecke" },
+  { kurz: "Kürbis", name: "Topfen-Kürbis", rezept: "Topfen-Kürbis", preis: 1.5, aktiv: false, aliases: "topfen kürbis, kürbisweckerl, topfen-kürbis" },
   { kurz: "VK", name: "Vollkornbrot", rezept: "Vollkornbrot", preis: 4.2, halbe: true, aktiv: false, aliases: "vollkorn, vollkornbrot" },
   { kurz: "Rp", name: "Roggenpur", rezept: "Roggenpur", preis: 4.2, halbe: true, aktiv: false, aliases: "roggenpur, roggenbrot" },
   { kurz: "Christl", name: "A Christel", rezept: "A Christel", preis: 4.0, halbe: true, aktiv: false, aliases: "christel, a christel" },
@@ -339,6 +339,21 @@ const SORTEN_UPDATES = [
           ? Number(x.preis) > 0 ? x : { ...x, preis: 5.0 }
           : x
       ),
+  },
+  {
+    // Preise vom 02.10.2026 (von Börni genannt, gelten einmalig auch über einen alten Preis)
+    id: "2026-10-preise-apfel-kuerbis-mohn",
+    anwenden: (sorten) => {
+      const preise = [
+        [["apfel", "apfelschnecke"], 3.5],
+        [["kuerbis", "topfen kuerbis"], 1.5],
+        [["mohn", "mohnkipferl"], 3.5],
+      ];
+      return sorten.map((x) => {
+        const p = preise.find(([namen]) => namen.includes(normalizeName(x.kurz)) || namen.includes(normalizeName(x.name)));
+        return p ? { ...x, preis: p[1] } : x;
+      });
+    },
   },
 ];
 function sortenAktualisieren(daten) {
