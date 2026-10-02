@@ -289,6 +289,8 @@ const STANDARD_SORTEN = [
   { kurz: "Dinkel", name: "Dinkelbrot", rezept: "Dinkelpur", preis: 4.2, halbe: true, aliases: "dinkelpur, dinkelbrot" },
   { kurz: "RT", name: "Roggentraum", rezept: "Roggentraum", preis: 0, halbe: true, aliases: "roggentraum, roggen traum" },
   { kurz: "Zeitlos", name: "Zeitlos", rezept: "Zeitlos", preis: 0, halbe: true, aliases: "" },
+  // Nussbrot = Bauernbrotteig + Walnüsse als Zugabe (Teig wird beim Bauernbrot mitgerechnet)
+  { kurz: "Nuss", name: "Nussbrot", rezept: "Bauernbrot", gProStueck: "1050", extras: [{ rohstoff: "Walnüsse", g: "200" }], preis: 0, halbe: true, aliases: "nussbrot, nussbrote, walnussbrot" },
   { kurz: "Dinkl", name: "Dinkelkrusti", rezept: "Dinkelkrusti", preis: 1.0, aliases: "dinkelkrusti, krusti, dinkelweckerl" },
   { kurz: "Mehrk.", name: "Mehrkorn", rezept: "", preis: 0, aliases: "mehrkorn, mehrkornweckerl" },
   { kurz: "D.Knolle", name: "Dinkelknolle", rezept: "", preis: 0, aliases: "dinkelknolle, knolle" },
@@ -298,14 +300,47 @@ const STANDARD_SORTEN = [
   { kurz: "Kn Cia", name: "Knoblauch-Ciabatta", rezept: "Knoblauch Dinkelciabatta", preis: 4.0, aliases: "knoblauch ciabatta, knoblauchciabatta, ciabatta, knobi" },
   { kurz: "Strizl", name: "Striezel", rezept: "", preis: 6.0, aliases: "striezel, brioche striezel" },
   { kurz: "Zimz", name: "Zimtschnecke", rezept: "", preis: 3.5, aliases: "zimt, zimtschnecke, zimtschnecken" },
-  { kurz: "Mohn", name: "Mohnkipferl", rezept: "", preis: 0, aliases: "mohnkipferl, mohnflesserl" },
+  { kurz: "Mohn", name: "Mohnkipferl", rezept: "Brioche", gProStueck: "80", extras: [{ rezept: "Mohnfülle", g: "80" }], preis: 0, aliases: "mohnkipferl, mohnflesserl" },
+  // Apfelfülle ohne Gewicht = 1 Portion aus dem Rezept pro Schnecke (56,9 g Fülle + Zimtzucker)
+  { kurz: "Apfel", name: "Apfelschnecke", rezept: "Brioche", gProStueck: "125", extras: [{ rezept: "Apfelfülle Zimtschnecken", g: "" }], preis: 0, aliases: "apfelschnecke, apfelschnecken, apfel schnecke, apfel-zimtschnecke" },
+  { kurz: "Kürbis", name: "Topfen-Kürbis", rezept: "Topfen-Kürbis", preis: 0, aktiv: false, aliases: "topfen kürbis, kürbisweckerl, topfen-kürbis" },
   { kurz: "VK", name: "Vollkornbrot", rezept: "Vollkornbrot", preis: 4.2, halbe: true, aktiv: false, aliases: "vollkorn, vollkornbrot" },
   { kurz: "Rp", name: "Roggenpur", rezept: "Roggenpur", preis: 4.2, halbe: true, aktiv: false, aliases: "roggenpur, roggenbrot" },
   { kurz: "Christl", name: "A Christel", rezept: "A Christel", preis: 4.0, halbe: true, aktiv: false, aliases: "christel, a christel" },
   { kurz: "Korn", name: "Kornspitz", rezept: "Kornspitz", preis: 1.0, aktiv: false, aliases: "kornspitz" },
 ].map((s) => ({ id: uid(), gProStueck: "", extras: [], aktiv: true, halbe: false, ...s }));
 
-const leereDaten = () => ({ version: 1, sorten: STANDARD_SORTEN, kunden: [], backtage: [] });
+// Einmalige Anpassungen an schon eingerichteten Sorten (laufen beim Laden, gemerkt in daten.sortenUpdates)
+const vorlage = (kurz) => STANDARD_SORTEN.find((s) => s.kurz === kurz);
+const SORTEN_UPDATES = [
+  {
+    id: "2026-10-mohn-apfel-nuss",
+    anwenden: (sorten) => {
+      const s = [...sorten];
+      const finde = (namen) => s.findIndex((x) => namen.some((n) => normalizeName(x.kurz) === normalizeName(n) || normalizeName(x.name) === normalizeName(n)));
+      const nach = (idx, neu) => s.splice(idx >= 0 ? idx + 1 : s.length, 0, { ...neu, id: uid() });
+      // Mohnkipferl: 80 g Brioche + 80 g Mohnfülle (Preis & Schreibweisen bleiben)
+      const iMohn = finde(["Mohn", "Mohnkipferl"]);
+      const mohn = { rezept: "Brioche", gProStueck: "80", extras: [{ rezept: "Mohnfülle", g: "80" }] };
+      if (iMohn >= 0) s[iMohn] = { ...s[iMohn], ...mohn };
+      else nach(-1, vorlage("Mohn"));
+      if (finde(["Apfel", "Apfelschnecke", "Apfelschnecken"]) < 0) nach(finde(["Mohn", "Mohnkipferl"]), vorlage("Apfel"));
+      if (finde(["Nuss", "Nussbrot"]) < 0) nach(finde(["Zeitlos", "Bauern"]), vorlage("Nuss"));
+      if (finde(["Kürbis", "Topfen-Kürbis"]) < 0) nach(-1, vorlage("Kürbis"));
+      return s;
+    },
+  },
+];
+function sortenAktualisieren(daten) {
+  const erledigt = daten.sortenUpdates || [];
+  const offen = SORTEN_UPDATES.filter((u) => !erledigt.includes(u.id));
+  if (!offen.length) return daten;
+  let sorten = daten.sorten;
+  offen.forEach((u) => (sorten = u.anwenden(sorten)));
+  return { ...daten, sorten, sortenUpdates: [...erledigt, ...offen.map((u) => u.id)] };
+}
+
+const leereDaten = () => ({ version: 1, sorten: STANDARD_SORTEN, sortenUpdates: SORTEN_UPDATES.map((u) => u.id), kunden: [], backtage: [] });
 
 // ---------- Speicher (jsonbin.io) ----------
 // Bestell-Daten liegen in einem eigenen Speicher. Rezepte & Rohstoffe werden aus dem Speicher der Lager-App nur GELESEN.
@@ -391,7 +426,23 @@ function gProStueck(sorte, rezept) {
   return rezeptGesamt(rezept) / (rezept.stueckProAnsatz || 1);
 }
 
-const VORSTUFE_RE = /sauerteig|kochst|quellst|vorteig|br(ü|ue)hst/i;
+const zahl = (v) => Number(String(v ?? "").replace(",", ".")) || 0;
+// Rohstoff per Name finden – auch bei leicht anderer Schreibweise ("Walnüsse" ↔ "Wallnüsse")
+function findRohstoff(materials, name) {
+  if (!name) return null;
+  const n = name.trim().toLowerCase();
+  const exakt = materials.find((m) => m.name.trim().toLowerCase() === n);
+  if (exakt) return exakt;
+  let best = null, score = 0;
+  materials.forEach((m) => {
+    if (m.vorteig) return;
+    const s = nameSimilarity(name, m.name);
+    if (s > score) { score = s; best = m; }
+  });
+  return score >= 0.85 ? best : null;
+}
+
+const VORSTUFE_RE =/sauerteig|kochst|quellst|vorteig|br(ü|ue)hst/i;
 
 function berechneBackzettel(backtag, sorten, lager) {
   const recipes = lager?.recipes || [];
@@ -407,18 +458,31 @@ function berechneBackzettel(backtag, sorten, lager) {
     .filter((s) => (stueck.get(s.id) || 0) > 0)
     .map((s) => ({ sorte: s, stueck: stueck.get(s.id) }));
 
-  // 2) Teig pro Rezept (Hauptteig + Extras wie Füllungen)
+  // 2) Teig pro Rezept (Hauptteig + Extras wie Füllungen) und Zugaben (z.B. Walnüsse ins Nussbrot)
   const teige = new Map(); // rezeptName -> {rezept, teigG, sorten:[]}
+  const zugaben = new Map(); // materialId -> {mat, menge, fuer:[]}
   const fehlend = [];
   proSorte.forEach(({ sorte, stueck: q }) => {
     const teile = [{ rezept: sorte.rezept, g: sorte.gProStueck, haupt: true }, ...(sorte.extras || [])];
     teile.forEach((t) => {
+      if (!t.haupt && t.rohstoff) {
+        const m = findRohstoff(materials, t.rohstoff);
+        const g = zahl(t.g);
+        if (!g) return;
+        const key = m ? m.id : `fehlt:${t.rohstoff}`;
+        if (!zugaben.has(key)) zugaben.set(key, { materialId: m?.id, name: m ? m.name : t.rohstoff, mat: m, menge: 0, fuer: [] });
+        const z = zugaben.get(key);
+        z.menge += q * g;
+        z.fuer.push({ kurz: sorte.kurz, stueck: q, g });
+        return;
+      }
       const rezept = findRezept(recipes, t.rezept);
       if (!rezept) {
         if (t.haupt) fehlend.push(sorte);
         return;
       }
-      const g = t.haupt ? gProStueck(sorte, rezept) : Number(String(t.g || "").replace(",", ".")) || 0;
+      // Extra ohne Gewicht = 1 Rezept-Portion pro Stück (Ansatz-Gewicht / Stück pro Ansatz)
+      const g = t.haupt ? gProStueck(sorte, rezept) : zahl(t.g) || gProStueck({ gProStueck: "" }, rezept);
       if (!g) return;
       const key = rezept.name;
       if (!teige.has(key)) teige.set(key, { rezept, teigG: 0, sorten: [] });
@@ -467,6 +531,9 @@ function berechneBackzettel(backtag, sorten, lager) {
     return { ...t, faktor, items };
   });
 
+  const zugabenListe = [...zugaben.values()].sort((a, b) => a.name.localeCompare(b.name, "de"));
+  zugabenListe.forEach((z) => z.materialId && alleItems.push({ materialId: z.materialId, menge: z.menge }));
+
   // 4) Rohstoffbedarf fürs Lager (alles in echte Rohstoffe aufgelöst)
   const rohstoffe = expandVorteige(
     alleItems.map((i) => ({ materialId: i.materialId, menge: i.menge })),
@@ -484,11 +551,13 @@ function berechneBackzettel(backtag, sorten, lager) {
   const verwaist = [
     ...vorstufenListe.filter((v) => v.teile.some((t) => !t.mat)).map((v) => v.name),
     ...teigListe.filter((t) => t.items.some((i) => !mat(i.materialId))).map((t) => t.rezept.name),
+    ...zugabenListe.filter((z) => !z.mat).map((z) => `Zugabe „${z.name}“`),
   ];
 
   return {
     proSorte,
     teige: teigListe.sort((a, b) => b.teigG - a.teigG),
+    zugaben: zugabenListe,
     vorstufen: vorstufenListe,
     rohstoffe,
     fehlend,
@@ -938,6 +1007,24 @@ function BackzettelTab({ backtag, sorten, lager, onUebergeben, onReloadLager, on
         </div>
       </Card>
 
+      {bz.zugaben.length > 0 && (
+        <Card>
+          <H2>🥜 Zugaben</H2>
+          <p className="text-xs -mt-2 mb-3" style={{ color: COL.inkMuted }}>Kommen zum fertigen Teig dazu, z.B. Walnüsse ins Nussbrot</p>
+          <div className="flex flex-col gap-2">
+            {bz.zugaben.map((z) => (
+              <div key={z.name} className="flex items-center justify-between gap-2 rounded-xl px-3 py-2" style={{ backgroundColor: COL.bg }}>
+                <div>
+                  <div className="font-semibold">{z.mat ? z.name : `⚠ ${z.name} (nicht im Lager)`}</div>
+                  <div className="text-xs" style={{ color: COL.inkMuted }}>{z.fuer.map((f) => `${fmtQty(f.stueck)}× ${f.kurz} à ${fmtG(f.g)}`).join(" · ")}</div>
+                </div>
+                <span className="text-lg font-bold" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtG(z.menge)}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       {bz.vorstufen.length > 0 && (
         <Card style={{ border: `2px solid ${COL.wheat}` }}>
           <H2>🫙 Vorstufen ansetzen</H2>
@@ -1113,6 +1200,27 @@ function BackzettelDruck({ backtag, sorten, kunden, lager, mitRohstoffen }) {
                   <td className="zahl" style={{ fontSize: "12pt" }}>{fmtG(v.menge)}</td>
                   <td>{v.teile.map((t) => `${fmtG(t.menge)} ${t.mat?.name || "⚠ gelöschter Rohstoff"}`).join(" + ") || "–"}</td>
                   <td style={{ fontSize: "8.5pt", color: "#555" }}>{v.fuer.join(", ")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      {bz.zugaben.length > 0 && (
+        <>
+          <h2>Zugaben</h2>
+          <table>
+            <thead>
+              <tr><th style={{ width: 18 }}></th><th>Zugabe</th><th className="zahl">Menge</th><th>für</th></tr>
+            </thead>
+            <tbody>
+              {bz.zugaben.map((z) => (
+                <tr key={z.name}>
+                  <td><Box /></td>
+                  <td><b>{z.name}</b></td>
+                  <td className="zahl" style={{ fontSize: "12pt" }}>{fmtG(z.menge)}</td>
+                  <td style={{ fontSize: "8.5pt", color: "#555" }}>{z.fuer.map((f) => `${fmtQty(f.stueck)}× ${f.kurz} à ${fmtG(f.g)}`).join(" · ")}</td>
                 </tr>
               ))}
             </tbody>
@@ -1491,24 +1599,40 @@ function EinstellungenTab({ daten, setDaten, lager, config, onReloadLager, onDis
                     <input style={{ ...inputStyle, borderColor: Number(s.preis) > 0 ? COL.line : COL.amber }} inputMode="decimal" value={s.preis ?? ""} onChange={(e) => upd(s.id, { preis: e.target.value.replace(",", ".") })} />
                   </Field>
                 </div>
-                {(s.extras || []).map((x, xi) => (
+                {(s.extras || []).map((x, xi) => {
+                  // Wert im Auswahlfeld: "r:Rezeptname" oder "m:Rohstoffname"
+                  const xRez = x.rezept ? findRezept(lager?.recipes || [], x.rezept) : null;
+                  const xMat = x.rohstoff ? findRohstoff(lager?.materials || [], x.rohstoff) : null;
+                  const wert = xRez ? `r:${xRez.name}` : xMat ? `m:${xMat.name}` : "";
+                  const xAuto = xRez ? gProStueck({ gProStueck: "" }, xRez) : 0;
+                  const setzen = (v) => {
+                    const neu = v.startsWith("r:") ? { rezept: v.slice(2), rohstoff: "" } : v.startsWith("m:") ? { rohstoff: v.slice(2), rezept: "" } : { rezept: "", rohstoff: "" };
+                    upd(s.id, { extras: s.extras.map((y, yi) => (yi === xi ? { ...y, ...neu } : y)) });
+                  };
+                  return (
                   <div key={xi} className="flex items-end gap-2 mt-2">
                     <div className="flex-1">
-                      <Field label="Extra-Rezept (Füllung, Topping …)">
-                        <select style={inputStyle} value={x.rezept} onChange={(e) => upd(s.id, { extras: s.extras.map((y, yi) => (yi === xi ? { ...y, rezept: e.target.value } : y)) })}>
+                      <Field label="Extra: Füllung/Topping (Rezept) oder Zugabe (Rohstoff)">
+                        <select style={{ ...inputStyle, borderColor: wert ? COL.line : COL.warn }} value={wert} onChange={(e) => setzen(e.target.value)}>
                           <option value="">– wählen –</option>
-                          {rezepte.map((r) => <option key={r.id} value={r.name}>{r.name}</option>)}
+                          <optgroup label="Rezepte">
+                            {rezepte.map((r) => <option key={r.id} value={`r:${r.name}`}>{r.name}</option>)}
+                          </optgroup>
+                          <optgroup label="Rohstoffe (Zugabe)">
+                            {[...(lager?.materials || [])].filter((m) => !m.vorteig).sort((a, b) => a.name.localeCompare(b.name, "de")).map((m) => <option key={m.id} value={`m:${m.name}`}>{m.name}</option>)}
+                          </optgroup>
                         </select>
                       </Field>
                     </div>
                     <div style={{ width: 90 }}>
                       <Field label="g/Stück">
-                        <input style={inputStyle} inputMode="decimal" value={x.g} onChange={(e) => upd(s.id, { extras: s.extras.map((y, yi) => (yi === xi ? { ...y, g: e.target.value } : y)) })} />
+                        <input style={inputStyle} inputMode="decimal" value={x.g ?? ""} placeholder={xAuto ? `${fmtNum(xAuto)} (Rezept)` : ""} onChange={(e) => upd(s.id, { extras: s.extras.map((y, yi) => (yi === xi ? { ...y, g: e.target.value } : y)) })} />
                       </Field>
                     </div>
                     <button className="pb-3" style={{ color: COL.warn }} onClick={() => upd(s.id, { extras: s.extras.filter((_, yi) => yi !== xi) })} aria-label="Extra entfernen"><IcX size={16} /></button>
                   </div>
-                ))}
+                  );
+                })}
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3 text-sm">
                   <label className="flex items-center gap-1.5"><input type="checkbox" checked={s.aktiv} onChange={(e) => upd(s.id, { aktiv: e.target.checked })} /> aktiv</label>
                   <label className="flex items-center gap-1.5"><input type="checkbox" checked={!!s.halbe} onChange={(e) => upd(s.id, { halbe: e.target.checked })} /> halbe möglich</label>
@@ -1613,9 +1737,9 @@ function App() {
   };
   const ladeDaten = async (c = config) => {
     const rec = await binRead(c.apiKey, c.bestellBin);
-    const d = { ...leereDaten(), ...rec };
-    if (!d.sorten?.length) d.sorten = STANDARD_SORTEN;
-    return d;
+    const d = { ...leereDaten(), ...rec, sortenUpdates: rec.sortenUpdates || [] };
+    if (!rec.sorten?.length) return { ...d, sorten: STANDARD_SORTEN, sortenUpdates: SORTEN_UPDATES.map((u) => u.id) };
+    return sortenAktualisieren(d);
   };
 
   useEffect(() => {
