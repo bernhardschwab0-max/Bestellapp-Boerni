@@ -293,7 +293,7 @@ const STANDARD_SORTEN = [
   { kurz: "Nuss", name: "Nussbrot", rezept: "Bauernbrot", gProStueck: "1050", extras: [{ rohstoff: "Walnüsse", g: "200" }], preis: 5.0, halbe: true, aliases: "nussbrot, nussbrote, walnussbrot" },
   { kurz: "Dinkl", name: "Dinkelkrusti", rezept: "Dinkelkrusti", preis: 1.0, aliases: "dinkelkrusti, krusti, dinkelweckerl" },
   { kurz: "Mehrk.", name: "Mehrkorn", rezept: "", preis: 0, aliases: "mehrkorn, mehrkornweckerl" },
-  { kurz: "D.Knolle", name: "Dinkelknolle", rezept: "", gProStueck: "105", preis: 0, aliases: "dinkelknolle, knolle" },
+  { kurz: "D.Knolle", name: "Dinkelknolle", rezept: "Wurzelbrot", gProStueck: "105", preis: 0, aliases: "dinkelknolle, knolle" },
   { kurz: "Käse", name: "Käseweckerl", rezept: "Semmelteig", gProStueck: "100", extras: [{ rohstoff: "Käse", g: "30" }], preis: 1.5, aliases: "kaese, käseweckerl, käsestangerl" },
   { kurz: "Speck", name: "Speckweckerl", rezept: "Semmelteig", gProStueck: "100", extras: [{ rohstoff: "Speck", g: "20" }], preis: 2.0, aliases: "speckweckerl, speckstangerl" },
   { kurz: "SchiKä", name: "Schinken-Käse", rezept: "Semmelteig", gProStueck: "100", extras: [{ rohstoff: "Schinken", g: "20" }, { rohstoff: "Käse", g: "35" }], preis: 2.0, aliases: "schinken käse, schinkenkäse, schinken-käse" },
@@ -384,6 +384,16 @@ const SORTEN_UPDATES = [
         return key ? { ...x, ...neu[key] } : x;
       });
     },
+  },
+  {
+    // Dinkelknolle: 105 g Dinkelwurzel-Teig (Rezept "Wurzelbrot")
+    id: "2026-10-dinkelknolle",
+    anwenden: (sorten) =>
+      sorten.map((x) =>
+        ["d knolle", "dinkelknolle"].some((n) => n === normalizeName(x.kurz) || n === normalizeName(x.name))
+          ? { ...x, rezept: "Wurzelbrot", gProStueck: "105" }
+          : x
+      ),
   },
 ];
 function sortenAktualisieren(daten) {
