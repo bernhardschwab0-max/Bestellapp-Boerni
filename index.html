@@ -299,7 +299,8 @@ const STANDARD_SORTEN = [
   { kurz: "SchiKä", name: "Schinken-Käse", rezept: "", preis: 2.0, aliases: "schinken käse, schinkenkäse, schinken-käse" },
   { kurz: "Kn Cia", name: "Knoblauch-Ciabatta", rezept: "Knoblauch Dinkelciabatta", preis: 4.0, aliases: "knoblauch ciabatta, knoblauchciabatta, ciabatta, knobi" },
   { kurz: "Strizl", name: "Striezel", rezept: "", preis: 6.0, aliases: "striezel, brioche striezel" },
-  { kurz: "Zimz", name: "Zimtschnecke", rezept: "", preis: 3.5, aliases: "zimt, zimtschnecke, zimtschnecken" },
+  // Zimtschnecke = 200 g Brioche + 60 g Zimtzucker (55 g Zucker + 5 g Zimt)
+  { kurz: "Zimz", name: "Zimtschnecke", rezept: "Brioche", gProStueck: "200", extras: [{ rohstoff: "Zucker", g: "55" }, { rohstoff: "Zimt", g: "5" }], preis: 3.5, aliases: "zimt, zimtschnecke, zimtschnecken" },
   { kurz: "Mohn", name: "Mohnkipferl", rezept: "Brioche", gProStueck: "80", extras: [{ rezept: "Mohnfülle", g: "80" }], preis: 3.5, aliases: "mohnkipferl, mohnflesserl" },
   // Apfelfülle ohne Gewicht = 1 Portion aus dem Rezept pro Schnecke (56,9 g Fülle + Zimtzucker)
   { kurz: "Apfel", name: "Apfelschnecke", rezept: "Brioche", gProStueck: "125", extras: [{ rezept: "Apfelfülle Zimtschnecken", g: "" }], preis: 3.5, aliases: "apfelschnecke, apfelschnecken, apfel schnecke, apfel-zimtschnecke" },
@@ -353,6 +354,18 @@ const SORTEN_UPDATES = [
         const p = preise.find(([namen]) => namen.includes(normalizeName(x.kurz)) || namen.includes(normalizeName(x.name)));
         return p ? { ...x, preis: p[1] } : x;
       });
+    },
+  },
+  {
+    // Zimtschnecke: 200 g Brioche + 55 g Zucker + 5 g Zimt (Preis & Schreibweisen bleiben)
+    id: "2026-10-zimtschnecke",
+    anwenden: (sorten) => {
+      const s = [...sorten];
+      const i = s.findIndex((x) => ["zimz", "zimtschnecke"].includes(normalizeName(x.kurz)) || normalizeName(x.name) === "zimtschnecke");
+      const zimt = { rezept: "Brioche", gProStueck: "200", extras: [{ rohstoff: "Zucker", g: "55" }, { rohstoff: "Zimt", g: "5" }] };
+      if (i >= 0) s[i] = { ...s[i], ...zimt };
+      else s.push({ ...vorlage("Zimz"), id: uid() });
+      return s;
     },
   },
 ];
@@ -1035,7 +1048,7 @@ function BackzettelTab({ backtag, sorten, lager, onUebergeben, onReloadLager, on
       {bz.zugaben.length > 0 && (
         <Card>
           <H2>🥜 Zugaben</H2>
-          <p className="text-xs -mt-2 mb-3" style={{ color: COL.inkMuted }}>Kommen zum fertigen Teig dazu, z.B. Walnüsse ins Nussbrot</p>
+          <p className="text-xs -mt-2 mb-3" style={{ color: COL.inkMuted }}>Kommen zum fertigen Teig dazu, z.B. Walnüsse ins Nussbrot oder Zimtzucker in die Zimtschnecken</p>
           <div className="flex flex-col gap-2">
             {bz.zugaben.map((z) => (
               <div key={z.name} className="flex items-center justify-between gap-2 rounded-xl px-3 py-2" style={{ backgroundColor: COL.bg }}>
