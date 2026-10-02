@@ -290,7 +290,7 @@ const STANDARD_SORTEN = [
   { kurz: "RT", name: "Roggentraum", rezept: "Roggentraum", preis: 0, halbe: true, aliases: "roggentraum, roggen traum" },
   { kurz: "Zeitlos", name: "Zeitlos", rezept: "Zeitlos", preis: 0, halbe: true, aliases: "" },
   // Nussbrot = Bauernbrotteig + Walnüsse als Zugabe (Teig wird beim Bauernbrot mitgerechnet)
-  { kurz: "Nuss", name: "Nussbrot", rezept: "Bauernbrot", gProStueck: "1050", extras: [{ rohstoff: "Walnüsse", g: "200" }], preis: 0, halbe: true, aliases: "nussbrot, nussbrote, walnussbrot" },
+  { kurz: "Nuss", name: "Nussbrot", rezept: "Bauernbrot", gProStueck: "1050", extras: [{ rohstoff: "Walnüsse", g: "200" }], preis: 5.0, halbe: true, aliases: "nussbrot, nussbrote, walnussbrot" },
   { kurz: "Dinkl", name: "Dinkelkrusti", rezept: "Dinkelkrusti", preis: 1.0, aliases: "dinkelkrusti, krusti, dinkelweckerl" },
   { kurz: "Mehrk.", name: "Mehrkorn", rezept: "", preis: 0, aliases: "mehrkorn, mehrkornweckerl" },
   { kurz: "D.Knolle", name: "Dinkelknolle", rezept: "", preis: 0, aliases: "dinkelknolle, knolle" },
@@ -329,6 +329,16 @@ const SORTEN_UPDATES = [
       if (finde(["Kürbis", "Topfen-Kürbis"]) < 0) nach(-1, vorlage("Kürbis"));
       return s;
     },
+  },
+  {
+    // Nussbrot 5,00 € – nur wenn noch kein Preis eingetragen ist
+    id: "2026-10-preis-nussbrot",
+    anwenden: (sorten) =>
+      sorten.map((x) =>
+        ["nuss", "nussbrot"].includes(normalizeName(x.kurz)) || normalizeName(x.name) === "nussbrot"
+          ? Number(x.preis) > 0 ? x : { ...x, preis: 5.0 }
+          : x
+      ),
   },
 ];
 function sortenAktualisieren(daten) {
