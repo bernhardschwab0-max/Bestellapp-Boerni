@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bestellapp-v9';
+const CACHE_NAME = 'bestellapp-v10';
 
 const APP_SHELL = [
   './',

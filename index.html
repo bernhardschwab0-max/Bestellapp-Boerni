@@ -447,6 +447,95 @@ async function binCreate(apiKey, data) {
   return (await res.json()).metadata.id;
 }
 
+// Form der Bestell-Daten im Speicher (ohne _stand, Backtage wie beim Speichern sortiert und gekürzt)
+function bestellNormalisieren(d) {
+  const { _stand, ...rest } = d || {};
+  return { ...rest, backtage: [...(rest.backtage || [])].sort((a, b) => b.datum.localeCompare(a.datum)).slice(0, MAX_BACKTAGE) };
+}
+
+// Alle Speicher des Kontos auflisten (je Seite 10, höchstens 5 Seiten)
+async function binListe(apiKey) {
+  const alle = [];
+  let letzte = "";
+  for (let i = 0; i < 5; i++) {
+    const res = await fetch(`https://api.jsonbin.io/v3/c/uncategorized/bins${letzte ? "/" + letzte : ""}`, { headers: { "X-Master-Key": apiKey } });
+    if (!res.ok) break;
+    const liste = await res.json();
+    if (!Array.isArray(liste) || !liste.length) break;
+    alle.push(...liste);
+    if (liste.length < 10) break;
+    letzte = liste[liste.length - 1].record;
+  }
+  return alle;
+}
+
+// Weitere Bestell-Speicher im selben Konto finden (z.B. weil jedes Gerät "Erstes Gerät" gewählt hat)
+async function andereBestellSpeicher(c) {
+  const liste = await binListe(c.apiKey);
+  const gefunden = [];
+  for (const b of liste) {
+    const id = b.record;
+    if (!id || id === c.bestellBin || id === c.lagerBin) continue;
+    try {
+      const rec = await binRead(c.apiKey, id);
+      if (!rec || rec.ersetztDurch || !Array.isArray(rec.sorten) || !Array.isArray(rec.backtage)) continue;
+      gefunden.push({
+        id,
+        rec,
+        kunden: (rec.kunden || []).length,
+        bestellungen: rec.backtage.reduce((s, bt) => s + (bt.bestellungen || []).length, 0),
+        stand: rec._stand || null,
+      });
+    } catch (e) {}
+  }
+  return gefunden;
+}
+
+// Zwei Bestell-Speicher zusammenführen: Kunden per Name, Sorten per Kürzel, Backtage per Datum
+function bestellSpeicherZusammenfuehren(haupt, neben) {
+  const daten = JSON.parse(JSON.stringify(haupt));
+  let neueKunden = 0, neueBestellungen = 0;
+  const kundeMap = new Map();
+  (neben.kunden || []).forEach((k) => {
+    const da = daten.kunden.find((x) => normalizeName(x.name) === normalizeName(k.name));
+    if (da) kundeMap.set(k.id, da.id);
+    else {
+      const neu = { ...k, id: daten.kunden.some((x) => x.id === k.id) ? uid() : k.id };
+      daten.kunden.push(neu);
+      kundeMap.set(k.id, neu.id);
+      neueKunden++;
+    }
+  });
+  const sorteMap = new Map();
+  (neben.sorten || []).forEach((s) => {
+    const da = daten.sorten.find((x) => normalizeName(x.kurz) === normalizeName(s.kurz) || normalizeName(x.name) === normalizeName(s.name));
+    if (da) sorteMap.set(s.id, da.id);
+    else {
+      const neu = { ...s, id: daten.sorten.some((x) => x.id === s.id) ? uid() : s.id };
+      daten.sorten.push(neu);
+      sorteMap.set(s.id, neu.id);
+    }
+  });
+  (neben.backtage || []).forEach((bt) => {
+    let ziel = daten.backtage.find((x) => x.datum === bt.datum);
+    if (!ziel) {
+      ziel = { ...bt, id: daten.backtage.some((x) => x.id === bt.id) ? uid() : bt.id, bestellungen: [] };
+      daten.backtage.push(ziel);
+    }
+    (bt.bestellungen || []).forEach((b) => {
+      const items = {};
+      Object.entries(b.items || {}).forEach(([sid, q]) => (items[sorteMap.get(sid) || sid] = q));
+      const kundeId = kundeMap.get(b.kundeId) || b.kundeId;
+      const doppelt = ziel.bestellungen.some((x) => x.id === b.id || (x.kundeId === kundeId && gleichJson(x.items, items)));
+      if (doppelt) return;
+      ziel.bestellungen.push({ ...b, kundeId, items });
+      neueBestellungen++;
+    });
+  });
+  daten.sortenUpdates = [...new Set([...(daten.sortenUpdates || []), ...(neben.sortenUpdates || [])])];
+  return { daten: bestellNormalisieren(daten), neueKunden, neueBestellungen };
+}
+
 // ---------- Rechnen: Backzettel ----------
 function rezeptGesamt(r) {
   return r.items.reduce((s, it) => s + (Number(it.menge) || 0), 0);
@@ -716,8 +805,16 @@ function SetupScreen({ onReady }) {
     try {
       await binRead(c.apiKey, c.lagerBin); // prüft, ob der Link stimmt
       let bin = bestellBin.trim();
-      if (modus === "neu") bin = await binCreate(c.apiKey, leereDaten());
-      else await binRead(c.apiKey, bin);
+      if (modus === "neu") {
+        // Gibt es schon einen Bestell-Speicher (z.B. vom anderen Gerät)? Dann denselben verwenden statt einen zweiten anzulegen.
+        const vorhandene = await andereBestellSpeicher({ ...c, bestellBin: "" });
+        if (vorhandene.length) {
+          vorhandene.sort((a, b) => b.bestellungen + b.kunden - (a.bestellungen + a.kunden));
+          bin = vorhandene[0].id;
+        } else {
+          bin = await binCreate(c.apiKey, leereDaten());
+        }
+      } else await binRead(c.apiKey, bin);
       saveConfig({ ...c, bestellBin: bin });
       onReady();
     } catch (e) {
@@ -1567,7 +1664,7 @@ function KassaTab({ backtag, sorten, kunden, updateBacktag, onDrucken }) {
 }
 
 // ---------- Einstellungen ----------
-function EinstellungenTab({ daten, setDaten, lager, config, onReloadLager, onDisconnect }) {
+function EinstellungenTab({ daten, setDaten, lager, config, onReloadLager, onDisconnect, letzterStand, onAbgleichen, onSpeicherPruefen }) {
   const [bereich, setBereich] = useState("sorten");
   const [neueKunden, setNeueKunden] = useState("");
   const [zeigeLink, setZeigeLink] = useState(false);
@@ -1722,6 +1819,18 @@ function EinstellungenTab({ daten, setDaten, lager, config, onReloadLager, onDis
       {bereich === "app" && (
         <Card>
           <div className="flex flex-col gap-3 text-sm">
+            <div className="rounded-xl p-3" style={{ backgroundColor: COL.bg }}>
+              <div className="font-semibold mb-1">📱💻 Abgleich Handy & Laptop</div>
+              <div>Bestell-Speicher: <b style={{ fontFamily: "'IBM Plex Mono', monospace" }}>…{String(config.bestellBin).slice(-6)}</b></div>
+              <div>Lager-Speicher: <b style={{ fontFamily: "'IBM Plex Mono', monospace" }}>…{String(config.lagerBin).slice(-6)}</b> (muss gleich sein wie in der Lager-App)</div>
+              <div>Dieses Gerät: {GERAET.art}</div>
+              {letzterStand && <div>Zuletzt gespeichert: {fmtStand(letzterStand)}</div>}
+              <div className="text-xs mt-1" style={{ color: COL.inkMuted }}>Auf beiden Geräten müssen dieselben Nummern stehen. Sonst am richtigen Gerät „Neues Gerät einrichten“ öffnen und den QR-Code mit dem anderen scannen.</div>
+              <div className="flex flex-wrap gap-2 mt-2">
+                <Btn small primary onClick={onAbgleichen}>🔄 Jetzt abgleichen</Btn>
+                <Btn small onClick={onSpeicherPruefen}>🔍 Nach zweitem Speicher suchen</Btn>
+              </div>
+            </div>
             <div>📖 Aus der Lager-App geladen: <b>{lager?.recipes?.length || 0} Rezepte</b>, <b>{lager?.materials?.length || 0} Rohstoffe</b></div>
             <Btn onClick={onReloadLager}>🔄 Rezepte & Lagerstand neu laden</Btn>
             <div>💾 Speicher belegt: <b>{fmtNum(groesse / 1024)} kb</b> von 100 kb (die letzten {MAX_BACKTAGE} Backtage werden aufgehoben)</div>
@@ -1741,6 +1850,93 @@ function EinstellungenTab({ daten, setDaten, lager, config, onReloadLager, onDis
     </div>
   );
 }
+
+// ---------- Abgleich zwischen Handy und Laptop ----------
+// Jedes Gerät merkt sich den zuletzt geladenen/gespeicherten Stand ("Basis"). Hat inzwischen ein anderes
+// Gerät gespeichert, werden beim Speichern beide Änderungen zusammengeführt statt überschrieben.
+const GERAET = (() => {
+  let id = "";
+  try {
+    id = localStorage.getItem("geraet_id") || "";
+    if (!id) {
+      id = Math.random().toString(36).slice(2, 7);
+      localStorage.setItem("geraet_id", id);
+    }
+  } catch (e) {}
+  const art = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) ? "Handy" : "PC";
+  return { id, art };
+})();
+const neuerStand = () => ({ zeit: new Date().toISOString(), geraet: GERAET.id, art: GERAET.art });
+const ohneStand = (rec) => {
+  if (!rec || typeof rec !== "object") return rec;
+  const { _stand, ...rest } = rec;
+  return rest;
+};
+const gleichJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const hatIds = (arr) => Array.isArray(arr) && arr.every((x) => x && typeof x === "object" && x.id != null);
+
+// Drei-Wege-Abgleich: basis = gemeinsamer Ausgangsstand, mein = dieses Gerät, dein = Speicher (anderes Gerät)
+function abgleichen(basis, mein, dein, schluessel) {
+  if (gleichJson(mein, basis)) return dein;
+  if (dein === undefined || gleichJson(dein, basis) || gleichJson(mein, dein)) return mein;
+  // Lagerbestand: Änderungen beider Geräte zusammenrechnen (z.B. zwei Abbuchungen)
+  if (schluessel === "stock" && [basis, mein, dein].every((v) => typeof v === "number")) {
+    return Math.round((dein + (mein - basis)) * 1000) / 1000;
+  }
+  // Listen mit IDs (Rohstoffe, Rezepte, Kunden, Backtage, Bestellungen …): Eintrag für Eintrag
+  if (hatIds(mein) && hatIds(dein)) {
+    const b = new Map((hatIds(basis) ? basis : []).map((x) => [x.id, x]));
+    const m = new Map(mein.map((x) => [x.id, x]));
+    const d = new Map(dein.map((x) => [x.id, x]));
+    const ergebnis = [];
+    dein.forEach((t) => {
+      const bb = b.get(t.id);
+      const mm = m.get(t.id);
+      if (!mm) {
+        if (bb && gleichJson(t, bb)) return; // hier gelöscht, dort unverändert -> weg
+        ergebnis.push(t); // dort neu oder dort geändert -> behalten
+        return;
+      }
+      ergebnis.push(bb ? abgleichen(bb, mm, t) : mm);
+    });
+    mein.forEach((mm) => {
+      if (d.has(mm.id)) return;
+      const bb = b.get(mm.id);
+      if (bb && gleichJson(mm, bb)) return; // dort gelöscht, hier unverändert -> weg
+      ergebnis.push(mm); // hier neu oder hier geändert -> behalten
+    });
+    return ergebnis;
+  }
+  // Objekte: Feld für Feld
+  const istObj = (v) => v && typeof v === "object" && !Array.isArray(v);
+  if (istObj(mein) && istObj(dein)) {
+    const bo = istObj(basis) ? basis : {};
+    const out = {};
+    new Set([...Object.keys(dein), ...Object.keys(mein)]).forEach((k) => {
+      if (!(k in mein) && k in bo) {
+        if (!gleichJson(dein[k], bo[k])) out[k] = dein[k]; // hier gelöscht, dort geändert -> behalten
+        return;
+      }
+      if (!(k in dein) && k in bo) {
+        if (!gleichJson(mein[k], bo[k])) out[k] = mein[k];
+        return;
+      }
+      const v = abgleichen(bo[k], mein[k], dein[k], k);
+      if (v !== undefined) out[k] = v;
+    });
+    return out;
+  }
+  return mein; // beide Geräte haben denselben Wert geändert -> dieses Gerät gewinnt
+}
+
+const fmtStand = (st) => {
+  if (!st || !st.zeit) return "";
+  const d = new Date(st.zeit);
+  const heute = new Date().toDateString() === d.toDateString();
+  const zeit = d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+  const wer = st.geraet === GERAET.id ? "diesem Gerät" : st.art === "Handy" ? "dem Handy" : st.art === "PC" ? "dem Laptop/PC" : "einem anderen Gerät";
+  return `${heute ? "heute" : d.toLocaleDateString("de-DE")} ${zeit} von ${wer}`;
+};
 
 // ---------- Haupt-App ----------
 const TABS = [
@@ -1764,8 +1960,20 @@ function App() {
   const loadedRef = useRef(false);
   const dirtyRef = useRef(false);
   const skipSaveRef = useRef(false);
+  // Abgleich: zuletzt geladener/gespeicherter Stand im Speicher und wann
+  const basisRef = useRef(null);
+  const basisZeitRef = useRef(0);
+  const saveChainRef = useRef(Promise.resolve());
+  const latestRef = useRef({});
+  latestRef.current = { daten, config };
+  const [letzterStand, setLetzterStand] = useState(null);
+  const [abgleichInfo, setAbgleichInfo] = useState(null);
+  const [ladeFehler, setLadeFehler] = useState("");
+  const [ladeVersuch, setLadeVersuch] = useState(0);
+  const [zweitSpeicher, setZweitSpeicher] = useState(null); // weitere Bestell-Speicher (z.B. vom anderen Gerät)
+  const [speicherInfo, setSpeicherInfo] = useState("");
 
-  const ladeLager = async (c = config) => {
+  const ladeLager = async (c = latestRef.current.config) => {
     try {
       const rec = await binRead(c.apiKey, c.lagerBin);
       setLager({ recipes: rec.recipes || [], materials: rec.materials || [] });
@@ -1773,30 +1981,99 @@ function App() {
       setLager(null);
     }
   };
-  const ladeDaten = async (c = config) => {
+  // Liest den Bestell-Speicher; liefert den Rohstand (für den Abgleich) und die fertigen Daten (mit Sorten-Updates)
+  const ladeDaten = async (c) => {
     const rec = await binRead(c.apiKey, c.bestellBin);
+    if (rec.ersetztDurch) return { umziehen: rec.ersetztDurch };
     const d = { ...leereDaten(), ...rec, sortenUpdates: rec.sortenUpdates || [] };
-    if (!rec.sorten?.length) return { ...d, sorten: STANDARD_SORTEN, sortenUpdates: SORTEN_UPDATES.map((u) => u.id) };
-    return sortenAktualisieren(d);
+    delete d._stand;
+    const fertig = !rec.sorten?.length ? { ...d, sorten: STANDARD_SORTEN, sortenUpdates: SORTEN_UPDATES.map((u) => u.id) } : sortenAktualisieren(d);
+    return { rec, daten: fertig };
+  };
+  const umziehen = (c, neuerBin) => {
+    // Dieser Speicher wurde auf einem anderen Gerät mit dem richtigen zusammengeführt -> dorthin wechseln
+    const neu = { ...c, bestellBin: neuerBin };
+    saveConfig(neu);
+    setSpeicherInfo("Dieses Gerät verwendet jetzt denselben Bestell-Speicher wie dein anderes Gerät.");
+    setConfig(neu);
   };
 
   useEffect(() => {
     if (!config) { setLoading(false); return; }
+    let cancelled = false;
+    setLoading(true);
+    setLadeFehler("");
     (async () => {
       try {
-        const [d] = await Promise.all([ladeDaten(), ladeLager()]);
-        setDaten(d);
+        const [res] = await Promise.all([ladeDaten(config), ladeLager(config)]);
+        if (cancelled) return;
+        if (res.umziehen) return umziehen(config, res.umziehen);
+        basisRef.current = bestellNormalisieren(res.rec);
+        basisZeitRef.current = Date.now();
+        setLetzterStand(res.rec._stand || null);
+        // Nur speichern, wenn beim Laden etwas angepasst wurde (Sorten-Update) – spart Zugriffe
+        skipSaveRef.current = gleichJson(bestellNormalisieren(res.daten), basisRef.current);
+        setDaten(res.daten);
+        const d = res.daten;
         const kommend = [...d.backtage].sort((a, b) => a.datum.localeCompare(b.datum)).find((b) => b.datum >= isoHeute());
         setBacktagId((kommend || d.backtage[d.backtage.length - 1])?.id || null);
-      } catch (e) {
-        setSync("error");
-        setSyncFehler(e.message);
-      } finally {
         loadedRef.current = true;
+        setLoading(false);
+        speicherPruefen(config);
+      } catch (e) {
+        // Nicht mit leeren Daten weiterarbeiten – sonst würden die echten Daten beim Speichern überschrieben
+        if (cancelled) return;
+        loadedRef.current = false;
+        setLadeFehler(e.message || "Speicher nicht erreichbar");
         setLoading(false);
       }
     })();
-  }, [config]);
+    return () => { cancelled = true; };
+  }, [config, ladeVersuch]);
+
+  // Speichern mit Abgleich: ist der eigene Stand älter als 2 Minuten, zuerst nachsehen, ob ein anderes Gerät
+  // inzwischen gespeichert hat – dann beide Änderungen zusammenführen statt zu überschreiben.
+  const speichern = async (mein) => {
+    const c = latestRef.current.config;
+    let ziel = mein;
+    if (Date.now() - basisZeitRef.current > 2 * 60 * 1000) {
+      const cloud = await binRead(c.apiKey, c.bestellBin);
+      if (cloud.ersetztDurch) {
+        umziehen(c, cloud.ersetztDurch);
+        throw new Error("Speicher wurde zusammengeführt – deine letzte Änderung bitte nochmal eintragen");
+      }
+      const dein = bestellNormalisieren(cloud);
+      if (!gleichJson(dein, basisRef.current)) {
+        ziel = abgleichen(basisRef.current, mein, dein);
+        setAbgleichInfo(cloud._stand || { zeit: new Date().toISOString() });
+      }
+    }
+    const stand = neuerStand();
+    await binWrite(c.apiKey, c.bestellBin, { ...ziel, _stand: stand });
+    basisRef.current = ziel;
+    basisZeitRef.current = Date.now();
+    setLetzterStand(stand);
+    if (!gleichJson(ziel, mein)) {
+      const jetzt = bestellNormalisieren(latestRef.current.daten);
+      skipSaveRef.current = true;
+      setDaten(gleichJson(jetzt, mein) ? ziel : abgleichen(mein, jetzt, ziel));
+    }
+    dirtyRef.current = !gleichJson(bestellNormalisieren(latestRef.current.daten), ziel);
+  };
+  const jetztSpeichern = () => {
+    const mein = bestellNormalisieren(latestRef.current.daten);
+    saveChainRef.current = saveChainRef.current
+      .then(() => speichern(mein))
+      .then(() => {
+        setSync("saved");
+        setSyncFehler("");
+      })
+      .catch((e) => {
+        setSync("error");
+        setSyncFehler(e.message);
+      });
+    return saveChainRef.current;
+  };
 
   // Automatisch speichern
   useEffect(() => {
@@ -1807,35 +2084,102 @@ function App() {
     }
     dirtyRef.current = true;
     setSync("saving");
-    const t = setTimeout(async () => {
-      try {
-        const sortiert = [...daten.backtage].sort((a, b) => b.datum.localeCompare(a.datum)).slice(0, MAX_BACKTAGE);
-        await binWrite(config.apiKey, config.bestellBin, { ...daten, backtage: sortiert });
-        dirtyRef.current = false;
-        setSync("saved");
-        setSyncFehler("");
-      } catch (e) {
-        setSync("error");
-        setSyncFehler(e.message);
-      }
-    }, 900);
+    const t = setTimeout(jetztSpeichern, 900);
     return () => clearTimeout(t);
   }, [daten]);
 
-  // Beim Zurückkehren in die App: Änderungen vom anderen Gerät holen (nur wenn hier nichts ungespeichert ist)
+  // Neuesten Stand holen (beim Zurückkehren in die App oder per Knopf) – nur wenn hier nichts ungespeichert ist
+  const holen = async () => {
+    const c = latestRef.current.config;
+    if (!c || dirtyRef.current || !loadedRef.current) return;
+    try {
+      const [res] = await Promise.all([ladeDaten(c), ladeLager(c)]);
+      if (res.umziehen) return umziehen(c, res.umziehen);
+      const dein = bestellNormalisieren(res.rec);
+      setLetzterStand(res.rec._stand || null);
+      if (!gleichJson(dein, basisRef.current) || !gleichJson(bestellNormalisieren(latestRef.current.daten), dein)) {
+        skipSaveRef.current = gleichJson(bestellNormalisieren(res.daten), dein);
+        setDaten(res.daten);
+      }
+      basisRef.current = dein;
+      basisZeitRef.current = Date.now();
+      setSync("saved");
+    } catch (e) {}
+  };
+
   useEffect(() => {
-    const onVis = async () => {
-      if (document.visibilityState !== "visible" || !config || dirtyRef.current || !loadedRef.current) return;
+    let verstecktSeit = 0;
+    const onVis = () => {
+      if (document.visibilityState === "hidden") {
+        verstecktSeit = Date.now();
+        ausstehendSpeichern();
+      } else if (verstecktSeit && Date.now() - verstecktSeit > 20 * 1000) {
+        holen();
+      }
+    };
+    // Nur wenn noch eine Änderung auf dem Weg ist: sofort abschicken
+    const ausstehendSpeichern = () => {
+      const { config: c, daten: d } = latestRef.current;
+      if (!c || !loadedRef.current || !dirtyRef.current) return;
       try {
-        const d = await ladeDaten();
-        skipSaveRef.current = true;
-        setDaten(d);
-        ladeLager();
+        fetch(`https://api.jsonbin.io/v3/b/${c.bestellBin}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", "X-Master-Key": c.apiKey },
+          body: JSON.stringify({ ...bestellNormalisieren(d), _stand: neuerStand() }),
+          keepalive: true,
+        });
       } catch (e) {}
     };
     document.addEventListener("visibilitychange", onVis);
-    return () => document.removeEventListener("visibilitychange", onVis);
-  }, [config]);
+    window.addEventListener("pagehide", ausstehendSpeichern);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("pagehide", ausstehendSpeichern);
+    };
+  }, []);
+
+  // Einmal am Tag nachsehen, ob es noch einen zweiten Bestell-Speicher gibt (z.B. am Handy extra eingerichtet)
+  const speicherPruefen = async (c, zwingend = false) => {
+    try {
+      const heute = isoHeute() + c.bestellBin;
+      if (!zwingend && localStorage.getItem("speicher_check") === heute) return;
+      localStorage.setItem("speicher_check", heute);
+      const andere = await andereBestellSpeicher(c);
+      setZweitSpeicher(andere.length ? andere : null);
+      if (zwingend && !andere.length) setSpeicherInfo("Alles in Ordnung – es gibt nur diesen einen Bestell-Speicher.");
+    } catch (e) {}
+  };
+  const zusammenfuehren = async () => {
+    const c = latestRef.current.config;
+    let ergebnis = bestellNormalisieren(latestRef.current.daten);
+    const summe = { kunden: 0, bestellungen: 0 };
+    zweitSpeicher.forEach((z) => {
+      const r = bestellSpeicherZusammenfuehren(ergebnis, z.rec);
+      ergebnis = r.daten;
+      summe.kunden += r.neueKunden;
+      summe.bestellungen += r.neueBestellungen;
+    });
+    try {
+      setSync("saving");
+      const stand = neuerStand();
+      await binWrite(c.apiKey, c.bestellBin, { ...ergebnis, _stand: stand });
+      basisRef.current = ergebnis;
+      basisZeitRef.current = Date.now();
+      setLetzterStand(stand);
+      skipSaveRef.current = true;
+      setDaten(ergebnis);
+      // Den anderen Speicher als "umgezogen" markieren – das andere Gerät stellt sich dann selbst um. Daten bleiben dort als Sicherung.
+      for (const z of zweitSpeicher) {
+        await binWrite(c.apiKey, z.id, { ...z.rec, ersetztDurch: c.bestellBin, ersetztAm: new Date().toISOString() });
+      }
+      setZweitSpeicher(null);
+      setSync("saved");
+      setSpeicherInfo(`Zusammengeführt: ${summe.kunden} Kunden und ${summe.bestellungen} Bestellungen übernommen. Dein anderes Gerät stellt sich beim nächsten Öffnen automatisch auf diesen Speicher um.`);
+    } catch (e) {
+      setSync("error");
+      setSyncFehler(e.message);
+    }
+  };
 
   if (!config) return <SetupScreen onReady={() => setConfig(getConfig())} />;
   if (loading) {
@@ -1844,6 +2188,21 @@ function App() {
         <div style={{ fontSize: 56, animation: "rise 1.6s ease-in-out infinite" }}>🧾</div>
         <Brand small />
         <div className="text-sm">Bestellungen werden geholt …</div>
+      </div>
+    );
+  }
+  if (ladeFehler) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-6 text-center" style={{ backgroundColor: COL.bg, fontFamily: "'IBM Plex Sans', sans-serif", color: COL.ink }}>
+        <Brand small />
+        <div className="text-4xl">📡</div>
+        <div className="font-semibold">Deine Bestellungen konnten nicht geladen werden.</div>
+        <div className="text-sm max-w-sm" style={{ color: COL.inkMuted }}>
+          Bitte Internetverbindung prüfen. Damit nichts überschrieben wird, arbeitet die App erst weiter, wenn deine Daten da sind.
+          <br />
+          <span className="text-xs">({ladeFehler})</span>
+        </div>
+        <Btn primary onClick={() => setLadeVersuch((v) => v + 1)}>Nochmal versuchen</Btn>
       </div>
     );
   }
@@ -1890,7 +2249,10 @@ function App() {
     if (backtag.lagerUebergeben && !window.confirm("Dieser Backzettel wurde schon übergeben. Die Lager-App ersetzt dann den alten Abzug durch den neuen. Weiter?")) return;
     updateBacktag((bt) => ({ ...bt, lagerUebergeben: new Date().toISOString() }));
     const url = `${LAGER_APP_URL}#backzettel=${encodeURIComponent(JSON.stringify(payload))}`;
-    setTimeout(() => (window.location.href = url), 1200); // kurz warten, damit gespeichert wird
+    // Erst wechseln, wenn gespeichert ist (spätestens nach 5 Sekunden)
+    setTimeout(() => {
+      Promise.race([jetztSpeichern(), new Promise((r) => setTimeout(r, 5000))]).finally(() => (window.location.href = url));
+    }, 50);
   };
 
   const disconnect = () => {
@@ -1948,6 +2310,37 @@ function App() {
           <div className="text-sm px-4 py-3 rounded-2xl mb-4 no-print" style={{ backgroundColor: COL.warnSoft, color: COL.warn }}>⚠️ Speichern fehlgeschlagen: {syncFehler}</div>
         )}
 
+        {zweitSpeicher && (
+          <div className="text-sm px-4 py-3 rounded-2xl mb-4 no-print" style={{ backgroundColor: COL.amberSoft, color: COL.amber, border: `1px solid ${COL.wheat}` }}>
+            <div className="font-semibold mb-1">📱💻 Es gibt noch einen zweiten Bestell-Speicher</div>
+            <div className="mb-2">
+              Vermutlich wurde die Bestell-App auf deinem anderen Gerät extra eingerichtet – darum sind Handy und Laptop nicht gleich.
+              {zweitSpeicher.map((z) => (
+                <div key={z.id} className="text-xs mt-1">
+                  Speicher …{z.id.slice(-6)}: {z.kunden} Kunden, {z.bestellungen} Bestellungen{z.stand ? `, zuletzt ${fmtStand(z.stand)}` : ""}
+                </div>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Btn small primary onClick={zusammenfuehren}>Zusammenführen</Btn>
+              <Btn small onClick={() => setZweitSpeicher(null)}>Später</Btn>
+            </div>
+            <div className="text-xs mt-2">Alle Kunden und Bestellungen kommen in diesen Speicher. Das andere Gerät stellt sich danach automatisch um. Nichts wird gelöscht.</div>
+          </div>
+        )}
+        {speicherInfo && (
+          <div className="flex items-start gap-2 text-sm px-4 py-3 rounded-2xl mb-4 no-print" style={{ backgroundColor: COL.okSoft, color: COL.ok }}>
+            <span className="flex-1">✅ {speicherInfo}</span>
+            <button onClick={() => setSpeicherInfo("")} aria-label="Schließen"><IcX size={16} /></button>
+          </div>
+        )}
+        {abgleichInfo && (
+          <div className="flex items-start gap-2 text-sm px-4 py-3 rounded-2xl mb-4 no-print" style={{ backgroundColor: COL.amberSoft, color: COL.amber }}>
+            <span className="flex-1">🔄 Inzwischen wurde auf einem anderen Gerät gespeichert ({fmtStand(abgleichInfo)}). Beide Änderungen wurden zusammengeführt.</span>
+            <button onClick={() => setAbgleichInfo(null)} aria-label="Schließen"><IcX size={16} /></button>
+          </div>
+        )}
+
         <nav className="hidden sm:flex gap-1 mb-4 p-1 rounded-2xl w-fit no-print" style={{ backgroundColor: COL.surface, border: `1px solid ${COL.line}` }}>
           {TABS.map((t) => {
             const I = t.icon;
@@ -1961,7 +2354,17 @@ function App() {
         </nav>
 
         {tab === "einstellungen" ? (
-          <EinstellungenTab daten={daten} setDaten={setDaten} lager={lager} config={config} onReloadLager={() => ladeLager()} onDisconnect={disconnect} />
+          <EinstellungenTab
+            daten={daten}
+            setDaten={setDaten}
+            lager={lager}
+            config={config}
+            onReloadLager={() => ladeLager()}
+            onDisconnect={disconnect}
+            letzterStand={letzterStand}
+            onAbgleichen={holen}
+            onSpeicherPruefen={() => speicherPruefen(config, true)}
+          />
         ) : !backtag ? (
           <Card>
             <div className="text-center py-8">
