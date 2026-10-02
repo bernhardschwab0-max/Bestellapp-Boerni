@@ -287,13 +287,13 @@ function expandVorteige(items, materials, depth = 0) {
 const STANDARD_SORTEN = [
   { kurz: "Bauern", name: "Bauernbrot", rezept: "Bauernbrot", preis: 4.2, halbe: true, aliases: "bauernbrot" },
   { kurz: "Dinkel", name: "Dinkelbrot", rezept: "Dinkelpur", preis: 4.2, halbe: true, aliases: "dinkelpur, dinkelbrot" },
-  { kurz: "RT", name: "Roggentraum", rezept: "Roggentraum", preis: 0, halbe: true, aliases: "roggentraum, roggen traum" },
-  { kurz: "Zeitlos", name: "Zeitlos", rezept: "Zeitlos", preis: 0, halbe: true, aliases: "" },
+  { kurz: "RT", name: "Roggentraum", rezept: "Roggentraum", preis: 4.5, halbe: true, aliases: "roggentraum, roggen traum" },
+  { kurz: "Zeitlos", name: "Zeitlos", rezept: "Zeitlos", preis: 4.5, halbe: true, aliases: "" },
   // Nussbrot = Bauernbrotteig + Walnüsse als Zugabe (Teig wird beim Bauernbrot mitgerechnet)
   { kurz: "Nuss", name: "Nussbrot", rezept: "Bauernbrot", gProStueck: "1050", extras: [{ rohstoff: "Walnüsse", g: "200" }], preis: 5.0, halbe: true, aliases: "nussbrot, nussbrote, walnussbrot" },
   { kurz: "Dinkl", name: "Dinkelkrusti", rezept: "Dinkelkrusti", preis: 1.0, aliases: "dinkelkrusti, krusti, dinkelweckerl" },
-  { kurz: "Mehrk.", name: "Mehrkorn", rezept: "Kornspitz", gProStueck: "100", preis: 0, aliases: "mehrkorn, mehrkornweckerl" },
-  { kurz: "D.Knolle", name: "Dinkelknolle", rezept: "Wurzelbrot", gProStueck: "105", preis: 0, aliases: "dinkelknolle, knolle" },
+  { kurz: "Mehrk.", name: "Mehrkorn", rezept: "Kornspitz", gProStueck: "100", preis: 1.5, aliases: "mehrkorn, mehrkornweckerl" },
+  { kurz: "D.Knolle", name: "Dinkelknolle", rezept: "Wurzelbrot", gProStueck: "105", preis: 1.5, aliases: "dinkelknolle, knolle" },
   { kurz: "Käse", name: "Käseweckerl", rezept: "Semmelteig", gProStueck: "100", extras: [{ rohstoff: "Käse", g: "30" }], preis: 1.5, aliases: "kaese, käseweckerl, käsestangerl" },
   { kurz: "Speck", name: "Speckweckerl", rezept: "Semmelteig", gProStueck: "100", extras: [{ rohstoff: "Speck", g: "20" }], preis: 2.0, aliases: "speckweckerl, speckstangerl" },
   { kurz: "SchiKä", name: "Schinken-Käse", rezept: "Semmelteig", gProStueck: "100", extras: [{ rohstoff: "Schinken", g: "20" }, { rohstoff: "Käse", g: "35" }], preis: 2.0, aliases: "schinken käse, schinkenkäse, schinken-käse" },
@@ -404,6 +404,22 @@ const SORTEN_UPDATES = [
           ? { ...x, rezept: "Kornspitz", gProStueck: "100" }
           : x
       ),
+  },
+  {
+    // Preise vom 02.10.2026 (von Börni genannt)
+    id: "2026-10-preise-mehrkorn-knolle-rt-zeitlos",
+    anwenden: (sorten) => {
+      const preise = [
+        [["mehrk", "mehrkorn"], 1.5],
+        [["d knolle", "dinkelknolle"], 1.5],
+        [["rt", "roggentraum"], 4.5],
+        [["zeitlos"], 4.5],
+      ];
+      return sorten.map((x) => {
+        const p = preise.find(([namen]) => namen.includes(normalizeName(x.kurz)) || namen.includes(normalizeName(x.name)));
+        return p ? { ...x, preis: p[1] } : x;
+      });
+    },
   },
 ];
 function sortenAktualisieren(daten) {
