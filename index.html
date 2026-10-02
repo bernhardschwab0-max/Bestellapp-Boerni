@@ -293,12 +293,12 @@ const STANDARD_SORTEN = [
   { kurz: "Nuss", name: "Nussbrot", rezept: "Bauernbrot", gProStueck: "1050", extras: [{ rohstoff: "Walnüsse", g: "200" }], preis: 5.0, halbe: true, aliases: "nussbrot, nussbrote, walnussbrot" },
   { kurz: "Dinkl", name: "Dinkelkrusti", rezept: "Dinkelkrusti", preis: 1.0, aliases: "dinkelkrusti, krusti, dinkelweckerl" },
   { kurz: "Mehrk.", name: "Mehrkorn", rezept: "", preis: 0, aliases: "mehrkorn, mehrkornweckerl" },
-  { kurz: "D.Knolle", name: "Dinkelknolle", rezept: "", preis: 0, aliases: "dinkelknolle, knolle" },
-  { kurz: "Käse", name: "Käseweckerl", rezept: "", preis: 1.5, aliases: "kaese, käseweckerl, käsestangerl" },
-  { kurz: "Speck", name: "Speckweckerl", rezept: "", preis: 2.0, aliases: "speckweckerl, speckstangerl" },
-  { kurz: "SchiKä", name: "Schinken-Käse", rezept: "", preis: 2.0, aliases: "schinken käse, schinkenkäse, schinken-käse" },
+  { kurz: "D.Knolle", name: "Dinkelknolle", rezept: "", gProStueck: "105", preis: 0, aliases: "dinkelknolle, knolle" },
+  { kurz: "Käse", name: "Käseweckerl", rezept: "Semmelteig", gProStueck: "100", extras: [{ rohstoff: "Käse", g: "30" }], preis: 1.5, aliases: "kaese, käseweckerl, käsestangerl" },
+  { kurz: "Speck", name: "Speckweckerl", rezept: "Semmelteig", gProStueck: "100", extras: [{ rohstoff: "Speck", g: "20" }], preis: 2.0, aliases: "speckweckerl, speckstangerl" },
+  { kurz: "SchiKä", name: "Schinken-Käse", rezept: "Semmelteig", gProStueck: "100", extras: [{ rohstoff: "Schinken", g: "20" }, { rohstoff: "Käse", g: "35" }], preis: 2.0, aliases: "schinken käse, schinkenkäse, schinken-käse" },
   { kurz: "Kn Cia", name: "Knoblauch-Ciabatta", rezept: "Knoblauch Dinkelciabatta", preis: 4.0, aliases: "knoblauch ciabatta, knoblauchciabatta, ciabatta, knobi" },
-  { kurz: "Strizl", name: "Striezel", rezept: "", preis: 6.0, aliases: "striezel, brioche striezel" },
+  { kurz: "Strizl", name: "Striezel", rezept: "Brioche", gProStueck: "600", preis: 6.0, aliases: "striezel, brioche striezel" },
   // Zimtschnecke = 200 g Brioche + 60 g Zimtzucker (55 g Zucker + 5 g Zimt)
   { kurz: "Zimz", name: "Zimtschnecke", rezept: "Brioche", gProStueck: "200", extras: [{ rohstoff: "Zucker", g: "55" }, { rohstoff: "Zimt", g: "5" }], preis: 3.5, aliases: "zimt, zimtschnecke, zimtschnecken" },
   { kurz: "Mohn", name: "Mohnkipferl", rezept: "Brioche", gProStueck: "80", extras: [{ rezept: "Mohnfülle", g: "80" }], preis: 3.5, aliases: "mohnkipferl, mohnflesserl" },
@@ -366,6 +366,23 @@ const SORTEN_UPDATES = [
       if (i >= 0) s[i] = { ...s[i], ...zimt };
       else s.push({ ...vorlage("Zimz"), id: uid() });
       return s;
+    },
+  },
+  {
+    // Weckerl aus Semmelteig mit Belag, Striezel aus Brioche, Dinkelknolle 105 g (Angaben vom 02.10.2026)
+    id: "2026-10-weckerl-striezel",
+    anwenden: (sorten) => {
+      const neu = {
+        "kaese|kaeseweckerl": { rezept: "Semmelteig", gProStueck: "100", extras: [{ rohstoff: "Käse", g: "30" }] },
+        "speck|speckweckerl": { rezept: "Semmelteig", gProStueck: "100", extras: [{ rohstoff: "Speck", g: "20" }] },
+        "schikae|schinken kaese": { rezept: "Semmelteig", gProStueck: "100", extras: [{ rohstoff: "Schinken", g: "20" }, { rohstoff: "Käse", g: "35" }] },
+        "strizl|striezel": { rezept: "Brioche", gProStueck: "600", extras: [] },
+        "d knolle|dinkelknolle": { gProStueck: "105" },
+      };
+      return sorten.map((x) => {
+        const key = Object.keys(neu).find((k) => k.split("|").some((n) => n === normalizeName(x.kurz) || n === normalizeName(x.name)));
+        return key ? { ...x, ...neu[key] } : x;
+      });
     },
   },
 ];
