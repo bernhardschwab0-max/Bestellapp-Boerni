@@ -760,12 +760,99 @@ function berechneBackzettel(backtag, sorten, lager) {
   };
 }
 
-function bestellSumme(b, sorten) {
+// ---------- Preise, Rabatt, Deckungsbeitrag ----------
+const RABATTE = [0, 10, 15, 20, 30, 40];
+const runden2 = (n) => Math.round(n * 100) / 100;
+// Summe ohne Rabatt
+function bestellBrutto(b, sorten) {
   return Object.entries(b.items || {}).reduce((s, [sid, q]) => {
     const so = sorten.find((x) => x.id === sid);
     return s + (Number(q) || 0) * (Number(so?.preis) || 0);
   }, 0);
 }
+function bestellRabatt(b, sorten) {
+  return runden2((bestellBrutto(b, sorten) * (Number(b.rabatt) || 0)) / 100);
+}
+// Zu zahlen (nach Rabatt)
+function bestellSumme(b, sorten) {
+  return runden2(bestellBrutto(b, sorten) - bestellRabatt(b, sorten));
+}
+
+// Rohstoffkosten pro Gramm eines Rezepts (Sauerteig & Kochstück in Mehl/Wasser aufgelöst, Preise aus der Lager-App)
+function rezeptKostenProG(rezept, materials) {
+  const ges = rezeptGesamt(rezept);
+  if (!ges) return 0;
+  const roh = expandVorteige(rezept.items.map((i) => ({ materialId: i.materialId, menge: i.menge })), materials);
+  return roh.reduce((s, r) => s + r.menge * (Number(materials.find((m) => m.id === r.materialId)?.price) || 0), 0) / ges;
+}
+// Rohstoffkosten für 1 Stück einer Sorte (Teig + Füllungen/Toppings + Zugaben)
+function stueckKosten(sorte, lager) {
+  const recipes = lager?.recipes || [];
+  const materials = lager?.materials || [];
+  const ohnePreis = new Set();
+  let unbekannt = false;
+  const preisFehlt = (m) => m && !(Number(m.price) > 0) && !/wasser/i.test(m.name);
+  const pruefen = (rezept) =>
+    expandVorteige(rezept.items.map((i) => ({ materialId: i.materialId, menge: i.menge })), materials).forEach((r) => {
+      const m = materials.find((x) => x.id === r.materialId);
+      if (preisFehlt(m)) ohnePreis.add(m.name);
+    });
+  let kosten = 0;
+  const haupt = findRezept(recipes, sorte.rezept);
+  if (!haupt) unbekannt = true;
+  else {
+    kosten += gProStueck(sorte, haupt) * rezeptKostenProG(haupt, materials);
+    pruefen(haupt);
+  }
+  (sorte.extras || []).forEach((x) => {
+    if (x.rohstoff) {
+      const m = findRohstoff(materials, x.rohstoff);
+      if (!m) unbekannt = true;
+      else {
+        kosten += zahl(x.g) * (Number(m.price) || 0);
+        if (preisFehlt(m)) ohnePreis.add(m.name);
+      }
+    } else if (x.rezept) {
+      const r = findRezept(recipes, x.rezept);
+      if (!r) unbekannt = true;
+      else {
+        kosten += (zahl(x.g) || gProStueck({ gProStueck: "" }, r)) * rezeptKostenProG(r, materials);
+        pruefen(r);
+      }
+    }
+  });
+  return { kosten, ohnePreis, unbekannt };
+}
+// Alles zu einer Bestellung: Summe, Rabatt (= Verlust durch Rabatt), zu zahlen, Rohstoffkosten, Deckungsbeitrag
+function bestellWirtschaft(b, sorten, lager) {
+  const brutto = bestellBrutto(b, sorten);
+  const rabatt = bestellRabatt(b, sorten);
+  const netto = runden2(brutto - rabatt);
+  const ohnePreis = new Set();
+  let unbekannt = false;
+  let kosten = 0;
+  Object.entries(b.items || {}).forEach(([sid, q]) => {
+    const so = sorten.find((x) => x.id === sid);
+    if (!so) return;
+    const k = stueckKosten(so, lager);
+    kosten += (Number(q) || 0) * k.kosten;
+    k.ohnePreis.forEach((n) => ohnePreis.add(n));
+    if (k.unbekannt) unbekannt = true;
+  });
+  kosten = runden2(kosten);
+  return {
+    brutto,
+    rabattProzent: Number(b.rabatt) || 0,
+    rabatt,
+    netto,
+    kosten,
+    db: runden2(netto - kosten),
+    dbOhneRabatt: runden2(brutto - kosten),
+    ohnePreis,
+    unbekannt,
+  };
+}
+const fmtProzent = (n) => (isFinite(n) ? `${Math.round(n)} %` : "–");
 function bestellText(b, sorten) {
   return sorten
     .filter((s) => (b.items?.[s.id] || 0) > 0)
@@ -955,9 +1042,71 @@ function Stepper({ value, onChange, halbe }) {
   );
 }
 
-function BestellEditor({ start, sorten, kunden, letzteBestellung, onSave, onCancel, onNeuerKunde }) {
+// Rabatt-Auswahl (Kein, 10 %, 15 % …)
+function RabattWahl({ wert, onChange, klein }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {RABATTE.map((r) => {
+        const on = (Number(wert) || 0) === r;
+        return (
+          <button
+            key={r}
+            onClick={() => onChange(r)}
+            className={`${klein ? "text-xs px-2 py-1" : "text-sm px-3 py-1.5"} font-semibold rounded-full`}
+            style={{ backgroundColor: on ? (r ? COL.warn : COL.ink) : COL.surface, color: on ? "#fff" : COL.ink, border: `1px solid ${on ? (r ? COL.warn : COL.ink) : COL.line}` }}
+          >
+            {r ? `−${r} %` : "Kein Rabatt"}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// Rechnung mit Rabatt, Verlust durch Rabatt und Deckungsbeitrag (nur für Börni, kommt nicht auf den Backzettel)
+function Wirtschaftlichkeit({ w, kompakt }) {
+  const zeile = (label, wert, stil = {}) => (
+    <div className="flex justify-between gap-2" style={stil}>
+      <span>{label}</span>
+      <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600 }}>{wert}</span>
+    </div>
+  );
+  const marge = w.netto > 0 ? (w.db / w.netto) * 100 : 0;
+  const gut = w.db > 0;
+  return (
+    <div className="rounded-xl p-3 text-sm flex flex-col gap-1" style={{ backgroundColor: COL.bg }}>
+      {zeile("Summe ohne Rabatt", fmtEUR(w.brutto))}
+      {w.rabattProzent > 0 && zeile(`Rabatt ${w.rabattProzent} % = dein Verlust`, `−${fmtEUR(w.rabatt)}`, { color: COL.warn })}
+      {zeile("Zu zahlen", fmtEUR(w.netto), { fontWeight: 700 })}
+      {zeile("Rohstoffkosten", `−${fmtEUR(w.kosten)}`, { color: COL.inkMuted })}
+      <div className="flex justify-between gap-2 pt-1 mt-1" style={{ borderTop: `1px solid ${COL.line}`, color: gut ? COL.ok : COL.warn, fontWeight: 700 }}>
+        <span>Deckungsbeitrag</span>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtEUR(w.db)}{w.netto > 0 ? ` (${fmtProzent(marge)})` : ""}</span>
+      </div>
+      {!kompakt && (
+        <div className="text-xs mt-1" style={{ color: gut ? COL.ok : COL.warn }}>
+          {gut
+            ? w.rabattProzent > 0
+              ? `✅ Trotz Rabatt bleiben dir ${fmtEUR(w.db)} – ohne Rabatt wären es ${fmtEUR(w.dbOhneRabatt)}.`
+              : `✅ Dir bleiben ${fmtEUR(w.db)} nach den Rohstoffkosten.`
+            : `⚠️ Mit diesem Rabatt deckst du nicht einmal die Rohstoffkosten – Verlust ${fmtEUR(-w.db)}.`}
+        </div>
+      )}
+      {!kompakt && (w.ohnePreis.size > 0 || w.unbekannt) && (
+        <div className="text-xs mt-1" style={{ color: COL.amber }}>
+          {w.ohnePreis.size > 0 && <>Ohne Preis in der Lager-App (Kosten sind dadurch zu niedrig): {[...w.ohnePreis].join(", ")}. </>}
+          {w.unbekannt && <>Nicht alle Rezepte gefunden – Lager-App einmal öffnen.</>}
+        </div>
+      )}
+      {!kompakt && <div className="text-xs" style={{ color: COL.inkMuted }}>Deckungsbeitrag = zu zahlen minus Rohstoffkosten (ohne Strom, Verpackung, Arbeitszeit).</div>}
+    </div>
+  );
+}
+
+function BestellEditor({ start, sorten, kunden, lager, letzteBestellung, onSave, onCancel, onNeuerKunde }) {
   const [kundeName, setKundeName] = useState(start?.kundeName || "");
   const [items, setItems] = useState(start?.items || {});
+  const [rabatt, setRabatt] = useState(Number(start?.rabatt) || 0);
   const [notiz, setNotiz] = useState(start?.notiz || "");
   const [quelle, setQuelle] = useState(start?.quelle || "whatsapp");
   const [waText, setWaText] = useState(start?.nachricht || "");
@@ -968,7 +1117,8 @@ function BestellEditor({ start, sorten, kunden, letzteBestellung, onSave, onCanc
   const kunde = kunden.find((k) => k.name.trim().toLowerCase() === kundeName.trim().toLowerCase());
   const letzte = kunde ? letzteBestellung(kunde.id) : null;
   const sichtbar = sorten.filter((s) => alleSorten || s.aktiv || (items[s.id] || 0) > 0);
-  const summe = Object.entries(items).reduce((s, [sid, q]) => s + q * (Number(sorten.find((x) => x.id === sid)?.preis) || 0), 0);
+  const wirtschaft = useMemo(() => bestellWirtschaft({ items, rabatt }, sorten, lager), [items, rabatt, sorten, lager]);
+  const summe = wirtschaft.netto;
 
   const erkennen = () => {
     const r = parseWhatsApp(waText, sorten, kunden);
@@ -988,7 +1138,7 @@ function BestellEditor({ start, sorten, kunden, letzteBestellung, onSave, onCanc
     const k = kunde || onNeuerKunde(kundeName.trim());
     // Die WhatsApp-Nachricht wird nur zum Nachlesen gespeichert (nicht gedruckt); "notiz" kommt auf die Zettel
     const nachricht = quelle === "whatsapp" && waText.trim() ? waText.trim().slice(0, 500) : "";
-    onSave({ ...(start || {}), id: start?.id || uid(), kundeId: k.id, items: clean, notiz: notiz.trim(), nachricht, quelle, bezahlt: start?.bezahlt || false });
+    onSave({ ...(start || {}), id: start?.id || uid(), kundeId: k.id, items: clean, rabatt, notiz: notiz.trim(), nachricht, quelle, bezahlt: start?.bezahlt || false });
   };
 
   return (
@@ -1056,6 +1206,12 @@ function BestellEditor({ start, sorten, kunden, letzteBestellung, onSave, onCanc
           </button>
         </div>
 
+        <div className="flex flex-col gap-2">
+          <span className="text-sm" style={{ color: COL.inkMuted }}>Rabatt</span>
+          <RabattWahl wert={rabatt} onChange={setRabatt} />
+          <Wirtschaftlichkeit w={wirtschaft} />
+        </div>
+
         <Field label="Notiz (optional)">
           <textarea style={{ ...inputStyle, minHeight: 50 }} value={notiz} onChange={(e) => setNotiz(e.target.value)} placeholder="z.B. geschnitten, holt selbst ab …" />
         </Field>
@@ -1072,7 +1228,7 @@ function BestellEditor({ start, sorten, kunden, letzteBestellung, onSave, onCanc
   );
 }
 
-function BestellungenTab({ backtag, sorten, kunden, updateBacktag, addKunde, letzteBestellung }) {
+function BestellungenTab({ backtag, sorten, kunden, lager, updateBacktag, addKunde, letzteBestellung }) {
   const [editor, setEditor] = useState(null); // null | {} | bestellung
   const [suche, setSuche] = useState("");
   const kName = (id) => kunden.find((k) => k.id === id)?.name || "(unbekannt)";
@@ -1108,6 +1264,7 @@ function BestellungenTab({ backtag, sorten, kunden, updateBacktag, addKunde, let
           start={editor.id ? { ...editor, kundeName: kName(editor.kundeId) } : null}
           sorten={sorten}
           kunden={kunden}
+          lager={lager}
           letzteBestellung={letzteBestellung}
           onSave={save}
           onCancel={() => setEditor(null)}
@@ -1137,6 +1294,7 @@ function BestellungenTab({ backtag, sorten, kunden, updateBacktag, addKunde, let
                 <div className="font-semibold flex items-center gap-1.5">
                   {kName(b.kundeId)}
                   <span className="text-xs">{b.quelle === "whatsapp" ? "💬" : "✍️"}</span>
+                  {Number(b.rabatt) > 0 && <span className="text-xs font-semibold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: COL.warnSoft, color: COL.warn }}>−{b.rabatt} %</span>}
                 </div>
                 <div className="text-sm mt-0.5" style={{ color: COL.inkMuted }}>{bestellText(b, sorten)}</div>
                 {b.notiz && <div className="text-xs mt-1 truncate" style={{ color: COL.amber }}>📝 {b.notiz}</div>}
@@ -1525,6 +1683,12 @@ function KundenzettelDruck({ backtag, sorten, kunden, mitPreisen }) {
               </tbody>
             </table>
             {b.notiz && <div style={{ fontStyle: "italic", fontSize: "9pt", marginTop: 4 }}>📝 {b.notiz}</div>}
+            {mitPreisen && Number(b.rabatt) > 0 && (
+              <div style={{ marginTop: 6, fontSize: "9.5pt" }}>
+                <div className="flex justify-between"><span>Summe</span><span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtEUR(bestellBrutto(b, sorten))}</span></div>
+                <div className="flex justify-between"><span>Rabatt {b.rabatt} %</span><span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>−{fmtEUR(bestellRabatt(b, sorten))}</span></div>
+              </div>
+            )}
             {mitPreisen && (
               <div className="flex justify-between items-center" style={{ marginTop: 6, paddingTop: 4, borderTop: "2px solid #111" }}>
                 <span style={{ fontWeight: 700 }}>{b.bezahlt ? "✓ bezahlt – danke!" : "Zu zahlen"}</span>
@@ -1548,6 +1712,7 @@ function LieferlisteDruck({ backtag, sorten, kunden }) {
   const spalten = lieferlisteSpalten(backtag, sorten);
   const gesamt = liste.reduce((s, b) => s + bestellSumme(b, sorten), 0);
   const offen = liste.filter((b) => !b.bezahlt).reduce((s, b) => s + bestellSumme(b, sorten), 0);
+  const hatRabatt = liste.some((b) => Number(b.rabatt) > 0);
   return (
     <>
       <DruckKopf
@@ -1565,6 +1730,7 @@ function LieferlisteDruck({ backtag, sorten, kunden }) {
           <tr>
             <th>Kunde</th>
             {spalten.map((s) => <th key={s.id} className="zahl" style={{ textAlign: "center" }}>{s.kurz}</th>)}
+            {hatRabatt && <th className="zahl">Rabatt</th>}
             <th className="zahl">€</th>
             <th style={{ textAlign: "center" }}>bez.</th>
           </tr>
@@ -1579,6 +1745,7 @@ function LieferlisteDruck({ backtag, sorten, kunden }) {
               {spalten.map((s) => (
                 <td key={s.id} className="zahl" style={{ textAlign: "center", fontSize: "11pt" }}>{b.items[s.id] ? fmtQty(b.items[s.id]) : ""}</td>
               ))}
+              {hatRabatt && <td className="zahl" style={{ fontWeight: 400 }}>{Number(b.rabatt) > 0 ? `−${b.rabatt} %` : ""}</td>}
               <td className="zahl">{fmtEUR(bestellSumme(b, sorten))}</td>
               <td style={{ textAlign: "center" }}>{b.bezahlt ? "✓" : <Box />}</td>
             </tr>
@@ -1592,6 +1759,7 @@ function LieferlisteDruck({ backtag, sorten, kunden }) {
                 {fmtQty(liste.reduce((sum, b) => sum + (b.items[s.id] || 0), 0))}
               </td>
             ))}
+            {hatRabatt && <td className="zahl" style={{ borderTop: "2px solid #111" }}>−{fmtEUR(liste.reduce((s, b) => s + bestellRabatt(b, sorten), 0))}</td>}
             <td className="zahl" style={{ borderTop: "2px solid #111" }}>{fmtEUR(gesamt)}</td>
             <td style={{ borderTop: "2px solid #111" }}></td>
           </tr>
@@ -1663,16 +1831,27 @@ function DruckAnsicht({ art, setArt, backtag, sorten, kunden, lager, onClose }) 
 }
 
 // ---------- Kunden & Kassa ----------
-function KassaTab({ backtag, sorten, kunden, updateBacktag, onDrucken }) {
+function KassaTab({ backtag, sorten, kunden, lager, updateBacktag, onDrucken }) {
   const kName = (id) => kunden.find((k) => k.id === id)?.name || "(unbekannt)";
   const liste = [...(backtag.bestellungen || [])].sort((a, b) => kName(a.kundeId).localeCompare(kName(b.kundeId), "de"));
   const gesamt = liste.reduce((s, b) => s + bestellSumme(b, sorten), 0);
   const bezahlt = liste.filter((b) => b.bezahlt).reduce((s, b) => s + bestellSumme(b, sorten), 0);
   const toggle = (b) => updateBacktag((bt) => ({ ...bt, bestellungen: bt.bestellungen.map((x) => (x.id === b.id ? { ...x, bezahlt: !x.bezahlt } : x)) }));
+  const setzeRabatt = (b, r) => updateBacktag((bt) => ({ ...bt, bestellungen: bt.bestellungen.map((x) => (x.id === b.id ? { ...x, rabatt: r } : x)) }));
+  const [rabattOffen, setRabattOffen] = useState(null);
+
+  // Auswertung für den ganzen Backtag
+  const wListe = useMemo(() => liste.map((b) => ({ b, w: bestellWirtschaft(b, sorten, lager) })), [liste, sorten, lager]);
+  const summe = (f) => runden2(wListe.reduce((s, x) => s + x.w[f], 0));
+  const mitRabatt = wListe.filter((x) => x.w.rabattProzent > 0);
+  const tag = { brutto: summe("brutto"), rabatt: summe("rabatt"), netto: summe("netto"), kosten: summe("kosten"), db: summe("db"), dbOhneRabatt: summe("dbOhneRabatt") };
+  const ohnePreis = new Set(wListe.flatMap((x) => [...x.w.ohnePreis]));
+  const unbekannt = wListe.some((x) => x.w.unbekannt);
 
   const waLink = (b) => {
     const zeilen = sorten.filter((s) => (b.items[s.id] || 0) > 0).map((s) => `${fmtQty(b.items[s.id])}× ${s.name} (${fmtEUR(b.items[s.id] * s.preis)})`);
-    const text = `Hallo ${kName(b.kundeId).split(" ")[0]}! 🍞\nDeine Bestellung für ${fmtDatum(backtag.datum)}:\n${zeilen.join("\n")}\nGesamt: ${fmtEUR(bestellSumme(b, sorten))}\n\nLiebe Grüße, Börni's Backstube`;
+    const rabattZeilen = Number(b.rabatt) > 0 ? `\nSumme: ${fmtEUR(bestellBrutto(b, sorten))}\nRabatt ${b.rabatt} %: −${fmtEUR(bestellRabatt(b, sorten))}` : "";
+    const text = `Hallo ${kName(b.kundeId).split(" ")[0]}! 🍞\nDeine Bestellung für ${fmtDatum(backtag.datum)}:\n${zeilen.join("\n")}${rabattZeilen}\nZu zahlen: ${fmtEUR(bestellSumme(b, sorten))}\n\nLiebe Grüße, Börni's Backstube`;
     return `https://wa.me/?text=${encodeURIComponent(text)}`;
   };
 
@@ -1696,6 +1875,37 @@ function KassaTab({ backtag, sorten, kunden, updateBacktag, onDrucken }) {
         </div>
       </Card>
 
+      <Card className="!p-4 no-print">
+        <H2>📊 Rabatt & Deckungsbeitrag</H2>
+        <div className="text-sm flex flex-col gap-1">
+          <div className="flex justify-between"><span>Umsatz ohne Rabatt</span><b style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtEUR(tag.brutto)}</b></div>
+          <div className="flex justify-between" style={{ color: tag.rabatt > 0 ? COL.warn : COL.inkMuted }}>
+            <span>Verlust durch Rabatte{mitRabatt.length ? ` (${mitRabatt.length} Bestellung${mitRabatt.length > 1 ? "en" : ""})` : ""}</span>
+            <b style={{ fontFamily: "'IBM Plex Mono', monospace" }}>−{fmtEUR(tag.rabatt)}</b>
+          </div>
+          <div className="flex justify-between"><span>Einnahmen</span><b style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtEUR(tag.netto)}</b></div>
+          <div className="flex justify-between" style={{ color: COL.inkMuted }}><span>Rohstoffkosten</span><b style={{ fontFamily: "'IBM Plex Mono', monospace" }}>−{fmtEUR(tag.kosten)}</b></div>
+          <div className="flex justify-between pt-1 mt-1" style={{ borderTop: `1px solid ${COL.line}`, color: tag.db > 0 ? COL.ok : COL.warn }}>
+            <b>Deckungsbeitrag</b>
+            <b style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtEUR(tag.db)}{tag.netto > 0 ? ` (${fmtProzent((tag.db / tag.netto) * 100)})` : ""}</b>
+          </div>
+          <div className="text-xs mt-1" style={{ color: tag.db > 0 ? COL.ok : COL.warn }}>
+            {tag.db > 0
+              ? tag.rabatt > 0
+                ? `✅ Trotz Rabatten bleiben dir ${fmtEUR(tag.db)} – ohne Rabatte wären es ${fmtEUR(tag.dbOhneRabatt)}.`
+                : `✅ Dir bleiben ${fmtEUR(tag.db)} nach den Rohstoffkosten.`
+              : `⚠️ Die Einnahmen decken nicht einmal die Rohstoffkosten – Verlust ${fmtEUR(-tag.db)}.`}
+          </div>
+          {(ohnePreis.size > 0 || unbekannt) && (
+            <div className="text-xs" style={{ color: COL.amber }}>
+              {ohnePreis.size > 0 && <>Ohne Preis in der Lager-App (Kosten dadurch zu niedrig): {[...ohnePreis].join(", ")}. </>}
+              {unbekannt && <>Nicht alle Rezepte gefunden – Lager-App einmal öffnen.</>}
+            </div>
+          )}
+          <div className="text-xs" style={{ color: COL.inkMuted }}>Deckungsbeitrag = Einnahmen minus Rohstoffkosten (ohne Strom, Verpackung, Arbeitszeit). Steht nicht auf Backzettel und Kundenzetteln.</div>
+        </div>
+      </Card>
+
       {liste.map((b) => (
         <Card key={b.id} className="!p-3.5" style={{ opacity: b.bezahlt ? 0.7 : 1 }}>
           <div className="flex items-start justify-between gap-2">
@@ -1710,6 +1920,20 @@ function KassaTab({ backtag, sorten, kunden, updateBacktag, onDrucken }) {
                 ))}
               </div>
               {b.notiz && <div className="text-xs mt-1 truncate" style={{ color: COL.amber, maxWidth: "100%" }}>📝 {b.notiz}</div>}
+              {Number(b.rabatt) > 0 && (
+                <div className="text-xs mt-1" style={{ color: COL.warn }}>
+                  Rabatt {b.rabatt} %: −{fmtEUR(bestellRabatt(b, sorten))} (statt {fmtEUR(bestellBrutto(b, sorten))})
+                </div>
+              )}
+              <button onClick={() => setRabattOffen(rabattOffen === b.id ? null : b.id)} className="text-xs mt-1 no-print underline" style={{ color: COL.inkMuted }}>
+                {rabattOffen === b.id ? "Rabatt & Deckungsbeitrag schließen" : "Rabatt & Deckungsbeitrag"}
+              </button>
+              {rabattOffen === b.id && (
+                <div className="mt-2 flex flex-col gap-2 no-print">
+                  <RabattWahl klein wert={b.rabatt} onChange={(r) => setzeRabatt(b, r)} />
+                  <Wirtschaftlichkeit w={wListe.find((x) => x.b.id === b.id)?.w || bestellWirtschaft(b, sorten, lager)} />
+                </div>
+              )}
             </div>
             <div className="flex flex-col items-end gap-2">
               <div className="text-lg font-bold" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtEUR(bestellSumme(b, sorten))}</div>
@@ -2440,11 +2664,11 @@ function App() {
             </div>
           </Card>
         ) : tab === "bestellungen" ? (
-          <BestellungenTab backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} updateBacktag={updateBacktag} addKunde={addKunde} letzteBestellung={letzteBestellung} />
+          <BestellungenTab backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} lager={lager} updateBacktag={updateBacktag} addKunde={addKunde} letzteBestellung={letzteBestellung} />
         ) : tab === "backzettel" ? (
           <BackzettelTab backtag={backtag} sorten={daten.sorten} lager={lager} onUebergeben={uebergeben} onReloadLager={() => ladeLager()} onDrucken={setDruck} />
         ) : (
-          <KassaTab backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} updateBacktag={updateBacktag} onDrucken={setDruck} />
+          <KassaTab backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} lager={lager} updateBacktag={updateBacktag} onDrucken={setDruck} />
         )}
 
         <nav className="sm:hidden bottom-nav no-print fixed bottom-0 left-0 right-0 z-20 flex justify-around px-2 pt-2" style={{ backgroundColor: "rgba(255,255,255,0.95)", backdropFilter: "blur(10px)", borderTop: `1px solid ${COL.line}` }}>
