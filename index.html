@@ -302,8 +302,8 @@ const STANDARD_SORTEN = [
   // Zimtschnecke = 200 g Brioche + 60 g Zimtzucker (55 g Zucker + 5 g Zimt)
   { kurz: "Zimz", name: "Zimtschnecke", rezept: "Brioche", gProStueck: "200", extras: [{ rohstoff: "Zucker", g: "55" }, { rohstoff: "Zimt", g: "5" }], preis: 3.5, aliases: "zimt, zimtschnecke, zimtschnecken" },
   { kurz: "Mohn", name: "Mohnkipferl", rezept: "Brioche", gProStueck: "80", extras: [{ rezept: "Mohnfülle", g: "80" }], preis: 3.5, aliases: "mohnkipferl, mohnflesserl" },
-  // Apfelfülle ohne Gewicht = 1 Portion aus dem Rezept pro Schnecke (56,9 g Fülle + Zimtzucker)
-  { kurz: "Apfel", name: "Apfelschnecke", rezept: "Brioche", gProStueck: "125", extras: [{ rezept: "Apfelfülle Zimtschnecken", g: "" }], preis: 3.5, aliases: "apfelschnecke, apfelschnecken, apfel schnecke, apfel-zimtschnecke" },
+  // Apfelschnecke: 150 g Brioche + 1 Portion Apfelfülle + 1 Portion Butter-Crumble (Rezepte in der Lager-App)
+  { kurz: "Apfel", name: "Apfelschnecke", rezept: "Brioche", gProStueck: "150", extras: [{ rezept: "Apfelfülle", g: "" }, { rezept: "Butter-Crumble", g: "" }], preis: 3.5, aliases: "apfelschnecke, apfelschnecken, apfel schnecke, apfel-zimtschnecke" },
   { kurz: "Kürbis", name: "Topfen-Kürbis", rezept: "Topfen-Kürbis", preis: 1.5, aktiv: false, aliases: "topfen kürbis, kürbisweckerl, topfen-kürbis" },
   { kurz: "VK", name: "Vollkornbrot", rezept: "Vollkornbrot", preis: 4.2, halbe: true, aktiv: false, aliases: "vollkorn, vollkornbrot" },
   { kurz: "Rp", name: "Roggenpur", rezept: "Roggenpur", preis: 4.2, halbe: true, aktiv: false, aliases: "roggenpur, roggenbrot" },
@@ -402,6 +402,16 @@ const SORTEN_UPDATES = [
       sorten.map((x) =>
         ["mehrk", "mehrkorn"].some((n) => n === normalizeName(x.kurz) || n === normalizeName(x.name))
           ? { ...x, rezept: "Kornspitz", gProStueck: "100" }
+          : x
+      ),
+  },
+  {
+    // Apfelschnecke neu (06.10.2026): 150 g Brioche + Apfelfülle (~71 g) + Butter-Crumble (35 g) obendrauf
+    id: "2026-10-apfelschnecke-neu",
+    anwenden: (sorten) =>
+      sorten.map((x) =>
+        ["apfel", "apfelschnecke"].some((n) => n === normalizeName(x.kurz) || n === normalizeName(x.name))
+          ? { ...x, rezept: "Brioche", gProStueck: "150", extras: [{ rezept: "Apfelfülle", g: "" }, { rezept: "Butter-Crumble", g: "" }] }
           : x
       ),
   },
@@ -642,6 +652,7 @@ function berechneBackzettel(backtag, sorten, lager) {
   const teige = new Map(); // rezeptName -> {rezept, teigG, sorten:[]}
   const zugaben = new Map(); // materialId -> {mat, menge, fuer:[]}
   const fehlend = [];
+  const fehlendeExtras = new Set();
   proSorte.forEach(({ sorte, stueck: q }) => {
     const teile = [{ rezept: sorte.rezept, g: sorte.gProStueck, haupt: true }, ...(sorte.extras || [])];
     teile.forEach((t) => {
@@ -659,6 +670,7 @@ function berechneBackzettel(backtag, sorten, lager) {
       const rezept = findRezept(recipes, t.rezept);
       if (!rezept) {
         if (t.haupt) fehlend.push(sorte);
+        else if (t.rezept) fehlendeExtras.add(`Füllung/Topping „${t.rezept}“ (${sorte.kurz})`);
         return;
       }
       // Extra ohne Gewicht = 1 Rezept-Portion pro Stück (Ansatz-Gewicht / Stück pro Ansatz)
@@ -732,6 +744,7 @@ function berechneBackzettel(backtag, sorten, lager) {
     ...vorstufenListe.filter((v) => v.teile.some((t) => !t.mat)).map((v) => v.name),
     ...teigListe.filter((t) => t.items.some((i) => !mat(i.materialId))).map((t) => t.rezept.name),
     ...zugabenListe.filter((z) => !z.mat).map((z) => `Zugabe „${z.name}“`),
+    ...fehlendeExtras,
   ];
 
   return {
@@ -1178,7 +1191,7 @@ function BackzettelTab({ backtag, sorten, lager, onUebergeben, onReloadLager, on
       )}
       {bz.verwaist.length > 0 && (
         <div className="text-sm px-4 py-3 rounded-2xl no-print" style={{ backgroundColor: COL.warnSoft, color: COL.warn }}>
-          ⚠️ <b>{bz.verwaist.join(", ")}</b> verweist auf einen gelöschten Rohstoff – dieser Anteil wird nicht vom Lager abgebucht.
+          ⚠️ <b>{bz.verwaist.join(", ")}</b> fehlt in der Lager-App (gelöschter Rohstoff oder neues Rezept) – dieser Anteil wird nicht berechnet und nicht abgebucht.
           Öffne einmal die <a href={LAGER_APP_URL} className="underline">Lager-App</a> (sie repariert das automatisch) und tippe dann unter Einstellungen → App auf „Rezepte & Lagerstand neu laden“.
         </div>
       )}
