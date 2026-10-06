@@ -823,8 +823,16 @@ function stueckKosten(sorte, lager) {
   });
   return { kosten, ohnePreis, unbekannt };
 }
-// Alles zu einer Bestellung: Summe, Rabatt (= Verlust durch Rabatt), zu zahlen, Rohstoffkosten, Deckungsbeitrag
-function bestellWirtschaft(b, sorten, lager) {
+// Herstellungskosten (Strom, Arbeitszeit, Verpackung) als Prozent der Materialkosten – laut Börni ca. gleich viel wie das Material
+const HERSTELL_PROZENT_STANDARD = 100;
+const herstellProzentVon = (daten) => {
+  const p = Number(daten?.herstellProzent);
+  return isFinite(p) && daten?.herstellProzent !== undefined && daten?.herstellProzent !== "" ? p : HERSTELL_PROZENT_STANDARD;
+};
+
+// Alles zu einer Bestellung: Summe, Rabatt (= Verlust durch Rabatt), zu zahlen, Materialkosten, Deckungsbeitrag,
+// Herstellungskosten und Gewinn
+function bestellWirtschaft(b, sorten, lager, herstellProzent = HERSTELL_PROZENT_STANDARD) {
   const brutto = bestellBrutto(b, sorten);
   const rabatt = bestellRabatt(b, sorten);
   const netto = runden2(brutto - rabatt);
@@ -840,14 +848,18 @@ function bestellWirtschaft(b, sorten, lager) {
     if (k.unbekannt) unbekannt = true;
   });
   kosten = runden2(kosten);
+  const herstell = runden2((kosten * (Number(herstellProzent) || 0)) / 100);
   return {
     brutto,
     rabattProzent: Number(b.rabatt) || 0,
     rabatt,
     netto,
-    kosten,
-    db: runden2(netto - kosten),
-    dbOhneRabatt: runden2(brutto - kosten),
+    kosten, // Materialkosten
+    db: runden2(netto - kosten), // Deckungsbeitrag nach Material
+    herstellProzent: Number(herstellProzent) || 0,
+    herstell, // Herstellungskosten
+    gewinn: runden2(netto - kosten - herstell),
+    gewinnOhneRabatt: runden2(brutto - kosten - herstell),
     ohnePreis,
     unbekannt,
   };
@@ -1063,47 +1075,55 @@ function RabattWahl({ wert, onChange, klein }) {
   );
 }
 
-// Rechnung mit Rabatt, Verlust durch Rabatt und Deckungsbeitrag (nur für Börni, kommt nicht auf den Backzettel)
-function Wirtschaftlichkeit({ w, kompakt }) {
+// Kalkulation mit Rabatt (nur für Börni, kommt weder auf den Backzettel noch auf die Kundenzettel):
+// zu zahlen − Materialkosten = Deckungsbeitrag − Herstellungskosten = Gewinn
+function Wirtschaftlichkeit({ w, rabattLabel, nettoLabel = "Zu zahlen", mitRabatt }) {
   const zeile = (label, wert, stil = {}) => (
     <div className="flex justify-between gap-2" style={stil}>
       <span>{label}</span>
-      <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600 }}>{wert}</span>
+      <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, whiteSpace: "nowrap" }}>{wert}</span>
     </div>
   );
-  const marge = w.netto > 0 ? (w.db / w.netto) * 100 : 0;
-  const gut = w.db > 0;
+  const anteil = (n) => (w.netto > 0 ? ` (${fmtProzent((n / w.netto) * 100)})` : "");
+  const strich = { borderTop: `1px solid ${COL.line}`, paddingTop: 4, marginTop: 2 };
+  const mitHerstellung = w.herstellProzent > 0;
+  const ergebnis = mitHerstellung ? w.gewinn : w.db;
+  const ergebnisOhneRabatt = mitHerstellung ? w.gewinnOhneRabatt : runden2(w.brutto - w.kosten);
+  const rabattDa = mitRabatt ?? w.rabattProzent > 0;
+  const farbe = (n) => (n > 0 ? COL.ok : COL.warn);
   return (
     <div className="rounded-xl p-3 text-sm flex flex-col gap-1" style={{ backgroundColor: COL.bg }}>
       {zeile("Summe ohne Rabatt", fmtEUR(w.brutto))}
-      {w.rabattProzent > 0 && zeile(`Rabatt ${w.rabattProzent} % = dein Verlust`, `−${fmtEUR(w.rabatt)}`, { color: COL.warn })}
-      {zeile("Zu zahlen", fmtEUR(w.netto), { fontWeight: 700 })}
-      {zeile("Rohstoffkosten", `−${fmtEUR(w.kosten)}`, { color: COL.inkMuted })}
-      <div className="flex justify-between gap-2 pt-1 mt-1" style={{ borderTop: `1px solid ${COL.line}`, color: gut ? COL.ok : COL.warn, fontWeight: 700 }}>
-        <span>Deckungsbeitrag</span>
-        <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtEUR(w.db)}{w.netto > 0 ? ` (${fmtProzent(marge)})` : ""}</span>
+      {rabattDa && zeile(rabattLabel || `Rabatt ${w.rabattProzent} % = dein Verlust`, `−${fmtEUR(w.rabatt)}`, { color: COL.warn })}
+      {zeile(nettoLabel, fmtEUR(w.netto), { fontWeight: 700 })}
+      {zeile("Materialkosten", `−${fmtEUR(w.kosten)}`, { color: COL.inkMuted })}
+      {zeile(`Deckungsbeitrag${anteil(w.db)}`, fmtEUR(w.db), { ...strich, fontWeight: 700, color: farbe(w.db) })}
+      {mitHerstellung && zeile(`Herstellungskosten (${w.herstellProzent} % vom Material)`, `−${fmtEUR(w.herstell)}`, { color: COL.inkMuted })}
+      {mitHerstellung && zeile(`Gewinn${anteil(w.gewinn)}`, fmtEUR(w.gewinn), { ...strich, fontWeight: 700, fontSize: 15, color: farbe(w.gewinn) })}
+      <div className="text-xs mt-1" style={{ color: farbe(ergebnis) }}>
+        {ergebnis > 0
+          ? rabattDa
+            ? `✅ Trotz Rabatt bleiben dir ${fmtEUR(ergebnis)} ${mitHerstellung ? "Gewinn" : ""} – ohne Rabatt wären es ${fmtEUR(ergebnisOhneRabatt)}.`
+            : `✅ Dir bleiben ${fmtEUR(ergebnis)} ${mitHerstellung ? "Gewinn nach Material und Herstellung" : "nach den Materialkosten"}.`
+          : w.db > 0
+          ? `⚠️ Das Material ist gedeckt, aber nicht die Herstellungskosten – Verlust ${fmtEUR(-ergebnis)}.`
+          : `⚠️ Nicht einmal das Material ist gedeckt – Verlust ${fmtEUR(-ergebnis)}.`}
       </div>
-      {!kompakt && (
-        <div className="text-xs mt-1" style={{ color: gut ? COL.ok : COL.warn }}>
-          {gut
-            ? w.rabattProzent > 0
-              ? `✅ Trotz Rabatt bleiben dir ${fmtEUR(w.db)} – ohne Rabatt wären es ${fmtEUR(w.dbOhneRabatt)}.`
-              : `✅ Dir bleiben ${fmtEUR(w.db)} nach den Rohstoffkosten.`
-            : `⚠️ Mit diesem Rabatt deckst du nicht einmal die Rohstoffkosten – Verlust ${fmtEUR(-w.db)}.`}
-        </div>
-      )}
-      {!kompakt && (w.ohnePreis.size > 0 || w.unbekannt) && (
+      {(w.ohnePreis.size > 0 || w.unbekannt) && (
         <div className="text-xs mt-1" style={{ color: COL.amber }}>
           {w.ohnePreis.size > 0 && <>Ohne Preis in der Lager-App (Kosten sind dadurch zu niedrig): {[...w.ohnePreis].join(", ")}. </>}
           {w.unbekannt && <>Nicht alle Rezepte gefunden – Lager-App einmal öffnen.</>}
         </div>
       )}
-      {!kompakt && <div className="text-xs" style={{ color: COL.inkMuted }}>Deckungsbeitrag = zu zahlen minus Rohstoffkosten (ohne Strom, Verpackung, Arbeitszeit).</div>}
+      <div className="text-xs" style={{ color: COL.inkMuted }}>
+        Materialkosten aus den Rohstoffpreisen der Lager-App
+        {mitHerstellung ? `, Herstellungskosten (Strom, Arbeitszeit, Verpackung) = ${w.herstellProzent} % davon – änderbar unter Einstellungen → App.` : "."}
+      </div>
     </div>
   );
 }
 
-function BestellEditor({ start, sorten, kunden, lager, letzteBestellung, onSave, onCancel, onNeuerKunde }) {
+function BestellEditor({ start, sorten, kunden, lager, herstellProzent, letzteBestellung, onSave, onCancel, onNeuerKunde }) {
   const [kundeName, setKundeName] = useState(start?.kundeName || "");
   const [items, setItems] = useState(start?.items || {});
   const [rabatt, setRabatt] = useState(Number(start?.rabatt) || 0);
@@ -1117,7 +1137,7 @@ function BestellEditor({ start, sorten, kunden, lager, letzteBestellung, onSave,
   const kunde = kunden.find((k) => k.name.trim().toLowerCase() === kundeName.trim().toLowerCase());
   const letzte = kunde ? letzteBestellung(kunde.id) : null;
   const sichtbar = sorten.filter((s) => alleSorten || s.aktiv || (items[s.id] || 0) > 0);
-  const wirtschaft = useMemo(() => bestellWirtschaft({ items, rabatt }, sorten, lager), [items, rabatt, sorten, lager]);
+  const wirtschaft = useMemo(() => bestellWirtschaft({ items, rabatt }, sorten, lager, herstellProzent), [items, rabatt, sorten, lager, herstellProzent]);
   const summe = wirtschaft.netto;
 
   const erkennen = () => {
@@ -1228,7 +1248,7 @@ function BestellEditor({ start, sorten, kunden, lager, letzteBestellung, onSave,
   );
 }
 
-function BestellungenTab({ backtag, sorten, kunden, lager, updateBacktag, addKunde, letzteBestellung }) {
+function BestellungenTab({ backtag, sorten, kunden, lager, herstellProzent, updateBacktag, addKunde, letzteBestellung }) {
   const [editor, setEditor] = useState(null); // null | {} | bestellung
   const [suche, setSuche] = useState("");
   const kName = (id) => kunden.find((k) => k.id === id)?.name || "(unbekannt)";
@@ -1265,6 +1285,7 @@ function BestellungenTab({ backtag, sorten, kunden, lager, updateBacktag, addKun
           sorten={sorten}
           kunden={kunden}
           lager={lager}
+          herstellProzent={herstellProzent}
           letzteBestellung={letzteBestellung}
           onSave={save}
           onCancel={() => setEditor(null)}
@@ -1831,7 +1852,7 @@ function DruckAnsicht({ art, setArt, backtag, sorten, kunden, lager, onClose }) 
 }
 
 // ---------- Kunden & Kassa ----------
-function KassaTab({ backtag, sorten, kunden, lager, updateBacktag, onDrucken }) {
+function KassaTab({ backtag, sorten, kunden, lager, herstellProzent, updateBacktag, onDrucken }) {
   const kName = (id) => kunden.find((k) => k.id === id)?.name || "(unbekannt)";
   const liste = [...(backtag.bestellungen || [])].sort((a, b) => kName(a.kundeId).localeCompare(kName(b.kundeId), "de"));
   const gesamt = liste.reduce((s, b) => s + bestellSumme(b, sorten), 0);
@@ -1841,12 +1862,14 @@ function KassaTab({ backtag, sorten, kunden, lager, updateBacktag, onDrucken }) 
   const [rabattOffen, setRabattOffen] = useState(null);
 
   // Auswertung für den ganzen Backtag
-  const wListe = useMemo(() => liste.map((b) => ({ b, w: bestellWirtschaft(b, sorten, lager) })), [liste, sorten, lager]);
+  const wListe = useMemo(() => liste.map((b) => ({ b, w: bestellWirtschaft(b, sorten, lager, herstellProzent) })), [liste, sorten, lager, herstellProzent]);
   const summe = (f) => runden2(wListe.reduce((s, x) => s + x.w[f], 0));
   const mitRabatt = wListe.filter((x) => x.w.rabattProzent > 0);
-  const tag = { brutto: summe("brutto"), rabatt: summe("rabatt"), netto: summe("netto"), kosten: summe("kosten"), db: summe("db"), dbOhneRabatt: summe("dbOhneRabatt") };
-  const ohnePreis = new Set(wListe.flatMap((x) => [...x.w.ohnePreis]));
-  const unbekannt = wListe.some((x) => x.w.unbekannt);
+  const tag = {
+    brutto: summe("brutto"), rabatt: summe("rabatt"), netto: summe("netto"), kosten: summe("kosten"), db: summe("db"),
+    herstell: summe("herstell"), gewinn: summe("gewinn"), gewinnOhneRabatt: summe("gewinnOhneRabatt"),
+    herstellProzent: Number(herstellProzent) || 0, rabattProzent: 0, ohnePreis: new Set(wListe.flatMap((x) => [...x.w.ohnePreis])), unbekannt: wListe.some((x) => x.w.unbekannt),
+  };
 
   const waLink = (b) => {
     const zeilen = sorten.filter((s) => (b.items[s.id] || 0) > 0).map((s) => `${fmtQty(b.items[s.id])}× ${s.name} (${fmtEUR(b.items[s.id] * s.preis)})`);
@@ -1876,34 +1899,14 @@ function KassaTab({ backtag, sorten, kunden, lager, updateBacktag, onDrucken }) 
       </Card>
 
       <Card className="!p-4 no-print">
-        <H2>📊 Rabatt & Deckungsbeitrag</H2>
-        <div className="text-sm flex flex-col gap-1">
-          <div className="flex justify-between"><span>Umsatz ohne Rabatt</span><b style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtEUR(tag.brutto)}</b></div>
-          <div className="flex justify-between" style={{ color: tag.rabatt > 0 ? COL.warn : COL.inkMuted }}>
-            <span>Verlust durch Rabatte{mitRabatt.length ? ` (${mitRabatt.length} Bestellung${mitRabatt.length > 1 ? "en" : ""})` : ""}</span>
-            <b style={{ fontFamily: "'IBM Plex Mono', monospace" }}>−{fmtEUR(tag.rabatt)}</b>
-          </div>
-          <div className="flex justify-between"><span>Einnahmen</span><b style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtEUR(tag.netto)}</b></div>
-          <div className="flex justify-between" style={{ color: COL.inkMuted }}><span>Rohstoffkosten</span><b style={{ fontFamily: "'IBM Plex Mono', monospace" }}>−{fmtEUR(tag.kosten)}</b></div>
-          <div className="flex justify-between pt-1 mt-1" style={{ borderTop: `1px solid ${COL.line}`, color: tag.db > 0 ? COL.ok : COL.warn }}>
-            <b>Deckungsbeitrag</b>
-            <b style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtEUR(tag.db)}{tag.netto > 0 ? ` (${fmtProzent((tag.db / tag.netto) * 100)})` : ""}</b>
-          </div>
-          <div className="text-xs mt-1" style={{ color: tag.db > 0 ? COL.ok : COL.warn }}>
-            {tag.db > 0
-              ? tag.rabatt > 0
-                ? `✅ Trotz Rabatten bleiben dir ${fmtEUR(tag.db)} – ohne Rabatte wären es ${fmtEUR(tag.dbOhneRabatt)}.`
-                : `✅ Dir bleiben ${fmtEUR(tag.db)} nach den Rohstoffkosten.`
-              : `⚠️ Die Einnahmen decken nicht einmal die Rohstoffkosten – Verlust ${fmtEUR(-tag.db)}.`}
-          </div>
-          {(ohnePreis.size > 0 || unbekannt) && (
-            <div className="text-xs" style={{ color: COL.amber }}>
-              {ohnePreis.size > 0 && <>Ohne Preis in der Lager-App (Kosten dadurch zu niedrig): {[...ohnePreis].join(", ")}. </>}
-              {unbekannt && <>Nicht alle Rezepte gefunden – Lager-App einmal öffnen.</>}
-            </div>
-          )}
-          <div className="text-xs" style={{ color: COL.inkMuted }}>Deckungsbeitrag = Einnahmen minus Rohstoffkosten (ohne Strom, Verpackung, Arbeitszeit). Steht nicht auf Backzettel und Kundenzetteln.</div>
-        </div>
+        <H2>📊 Rabatt, Deckungsbeitrag & Gewinn</H2>
+        <Wirtschaftlichkeit
+          w={tag}
+          nettoLabel="Einnahmen"
+          mitRabatt={tag.rabatt > 0}
+          rabattLabel={`Verlust durch Rabatte (${mitRabatt.length} Bestellung${mitRabatt.length > 1 ? "en" : ""})`}
+        />
+        <div className="text-xs mt-2" style={{ color: COL.inkMuted }}>Steht nicht auf Backzettel und Kundenzetteln.</div>
       </Card>
 
       {liste.map((b) => (
@@ -1931,7 +1934,7 @@ function KassaTab({ backtag, sorten, kunden, lager, updateBacktag, onDrucken }) 
               {rabattOffen === b.id && (
                 <div className="mt-2 flex flex-col gap-2 no-print">
                   <RabattWahl klein wert={b.rabatt} onChange={(r) => setzeRabatt(b, r)} />
-                  <Wirtschaftlichkeit w={wListe.find((x) => x.b.id === b.id)?.w || bestellWirtschaft(b, sorten, lager)} />
+                  <Wirtschaftlichkeit w={wListe.find((x) => x.b.id === b.id)?.w || bestellWirtschaft(b, sorten, lager, herstellProzent)} />
                 </div>
               )}
             </div>
@@ -2123,6 +2126,37 @@ function EinstellungenTab({ daten, setDaten, lager, config, onReloadLager, onDis
             </div>
             <div>📖 Aus der Lager-App geladen: <b>{lager?.recipes?.length || 0} Rezepte</b>, <b>{lager?.materials?.length || 0} Rohstoffe</b></div>
             <Btn onClick={onReloadLager}>🔄 Rezepte & Lagerstand neu laden</Btn>
+            <div className="rounded-xl p-3" style={{ backgroundColor: COL.bg }}>
+              <div className="font-semibold mb-1">🧮 Herstellungskosten</div>
+              <div className="text-xs mb-2" style={{ color: COL.inkMuted }}>
+                Strom, Arbeitszeit, Verpackung – als Anteil der Materialkosten (bei dir ca. 80–100 %). Daraus rechnet die App den Gewinn bei Rabatten.
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {[80, 90, 100].map((p) => {
+                  const on = herstellProzentVon(daten) === p;
+                  return (
+                    <button
+                      key={p}
+                      onClick={() => setDaten((d) => ({ ...d, herstellProzent: p }))}
+                      className="text-sm font-semibold px-3 py-1.5 rounded-full"
+                      style={{ backgroundColor: on ? COL.accent : COL.surface, color: on ? "#fff" : COL.ink, border: `1px solid ${on ? COL.accent : COL.line}` }}
+                    >
+                      {p} %
+                    </button>
+                  );
+                })}
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  style={{ ...inputStyle, width: 80 }}
+                  value={daten.herstellProzent ?? HERSTELL_PROZENT_STANDARD}
+                  onChange={(e) => setDaten((d) => ({ ...d, herstellProzent: e.target.value === "" ? "" : Number(e.target.value) }))}
+                  aria-label="Herstellungskosten in Prozent der Materialkosten"
+                />
+                <span className="text-sm">% der Materialkosten</span>
+              </div>
+            </div>
             <div>💾 Speicher belegt: <b>{fmtNum(groesse / 1024)} kb</b> von 100 kb (die letzten {MAX_BACKTAGE} Backtage werden aufgehoben)</div>
             <Btn onClick={() => setZeigeLink(!zeigeLink)}>📱 Neues Gerät einrichten</Btn>
             {zeigeLink && (
@@ -2664,11 +2698,11 @@ function App() {
             </div>
           </Card>
         ) : tab === "bestellungen" ? (
-          <BestellungenTab backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} lager={lager} updateBacktag={updateBacktag} addKunde={addKunde} letzteBestellung={letzteBestellung} />
+          <BestellungenTab backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} lager={lager} herstellProzent={herstellProzentVon(daten)} updateBacktag={updateBacktag} addKunde={addKunde} letzteBestellung={letzteBestellung} />
         ) : tab === "backzettel" ? (
           <BackzettelTab backtag={backtag} sorten={daten.sorten} lager={lager} onUebergeben={uebergeben} onReloadLager={() => ladeLager()} onDrucken={setDruck} />
         ) : (
-          <KassaTab backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} lager={lager} updateBacktag={updateBacktag} onDrucken={setDruck} />
+          <KassaTab backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} lager={lager} herstellProzent={herstellProzentVon(daten)} updateBacktag={updateBacktag} onDrucken={setDruck} />
         )}
 
         <nav className="sm:hidden bottom-nav no-print fixed bottom-0 left-0 right-0 z-20 flex justify-around px-2 pt-2" style={{ backgroundColor: "rgba(255,255,255,0.95)", backdropFilter: "blur(10px)", borderTop: `1px solid ${COL.line}` }}>
