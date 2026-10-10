@@ -284,6 +284,14 @@ function expandVorteige(items, materials, depth = 0) {
 
 // ---------- Standard-Sorten (Kürzel wie in deiner Verkaufsliste) ----------
 // rezept = Rezeptname in der Lager-App; gProStueck leer = Teiggewicht aus dem Rezept
+// Cookies (10.10.2026): 4er-Packung (4 × 60 g Teig) im Sackerl mit selbstgemachter Schleife – Verpackung 0,25 €/Packung.
+// 4,00 € pro Packung, im Hofladen 3,80 € (Sonderpreis, wird beim Update für den Kunden "Hofladen" eingetragen).
+const COOKIE_SORTEN = [
+  { kurz: "Cook.H", name: "Cookies Hell (4er)", rezept: "Cookies Hell", gProStueck: "240", verpackung: "0.25", preis: 4.0, aliases: "cookies hell, helle cookies, cookie hell" },
+  { kurz: "Cook.D", name: "Cookies Dunkel (4er)", rezept: "Cookies Dunkel", gProStueck: "240", verpackung: "0.25", preis: 4.0, aliases: "cookies dunkel, dunkle cookies, cookie dunkel, schoko cookies, kakao cookies" },
+];
+const HOFLADEN_COOKIE_PREIS = 3.8;
+
 const STANDARD_SORTEN = [
   { kurz: "Bauern", name: "Bauernbrot", rezept: "Bauernbrot", preis: 4.2, halbe: true, aliases: "bauernbrot" },
   { kurz: "Dinkel", name: "Dinkelbrot", rezept: "Dinkelpur", preis: 4.2, halbe: true, aliases: "dinkelpur, dinkelbrot" },
@@ -304,6 +312,7 @@ const STANDARD_SORTEN = [
   { kurz: "Mohn", name: "Mohnkipferl", rezept: "Brioche", gProStueck: "80", extras: [{ rezept: "Mohnfülle", g: "80" }], preis: 3.5, aliases: "mohnkipferl, mohnflesserl" },
   // Apfelschnecke: 150 g Brioche + 1 Portion Apfelfülle + 1 Portion Butter-Crumble (Rezepte in der Lager-App)
   { kurz: "Apfel", name: "Apfelschnecke", rezept: "Brioche", gProStueck: "150", extras: [{ rezept: "Apfelfülle", g: "" }, { rezept: "Butter-Crumble", g: "" }], preis: 3.5, aliases: "apfelschnecke, apfelschnecken, apfel schnecke, apfel-zimtschnecke" },
+  ...COOKIE_SORTEN,
   { kurz: "Kürbis", name: "Topfen-Kürbis", rezept: "Topfen-Kürbis", preis: 1.5, aktiv: false, aliases: "topfen kürbis, kürbisweckerl, topfen-kürbis" },
   { kurz: "VK", name: "Vollkornbrot", rezept: "Vollkornbrot", preis: 4.2, halbe: true, aktiv: false, aliases: "vollkorn, vollkornbrot" },
   { kurz: "Rp", name: "Roggenpur", rezept: "Roggenpur", preis: 4.2, halbe: true, aktiv: false, aliases: "roggenpur, roggenbrot" },
@@ -435,6 +444,24 @@ const SORTEN_UPDATES = [
     // Börni (10.10.2026): Herstellungskosten 90 % statt 100 % der Materialkosten
     id: "2026-10-herstellung-90",
     datenAnwenden: (daten) => ({ ...daten, herstellProzent: 90 }),
+  },
+  {
+    // Cookies Hell/Dunkel als 4er-Packung (nach der Apfelschnecke) + Kunde "Hofladen" mit Sonderpreis 3,80 €
+    id: "2026-10-cookies",
+    datenAnwenden: (daten) => {
+      let kunden = daten.kunden || [];
+      let hof = kunden.find((k) => normalizeName(k.name) === normalizeName("Hofladen"));
+      if (!hof) {
+        hof = { id: uid(), name: "Hofladen" };
+        kunden = [...kunden, hof];
+      }
+      const sorten = [...daten.sorten];
+      const da = (c) => sorten.some((x) => normalizeName(x.name) === normalizeName(c.name) || normalizeName(x.kurz) === normalizeName(c.kurz));
+      const neu = COOKIE_SORTEN.filter((c) => !da(c)).map((c) => ({ id: uid(), extras: [], aktiv: true, halbe: false, ...c, sonderpreise: { [hof.id]: HOFLADEN_COOKIE_PREIS } }));
+      const iApfel = sorten.findIndex((x) => normalizeName(x.kurz) === normalizeName("Apfel") || normalizeName(x.name) === normalizeName("Apfelschnecke"));
+      sorten.splice(iApfel >= 0 ? iApfel + 1 : sorten.length, 0, ...neu);
+      return { ...daten, kunden, sorten };
+    },
   },
 ];
 function sortenAktualisieren(daten) {
@@ -772,10 +799,15 @@ function berechneBackzettel(backtag, sorten, lager) {
 const RABATTE = [0, 10, 15, 20, 30, 40];
 const runden2 = (n) => Math.round(n * 100) / 100;
 // Summe ohne Rabatt
+// Verkaufspreis einer Sorte – mit Sonderpreis für einzelne Kunden (z.B. Hofladen), sonst der normale Preis
+function preisFuer(s, kundeId) {
+  const sonder = kundeId ? zahl(s?.sonderpreise?.[kundeId]) : 0;
+  return sonder > 0 ? sonder : Number(s?.preis) || 0;
+}
 function bestellBrutto(b, sorten) {
   return Object.entries(b.items || {}).reduce((s, [sid, q]) => {
     const so = sorten.find((x) => x.id === sid);
-    return s + (Number(q) || 0) * (Number(so?.preis) || 0);
+    return s + (Number(q) || 0) * preisFuer(so, b.kundeId);
   }, 0);
 }
 function bestellRabatt(b, sorten) {
@@ -847,15 +879,18 @@ function bestellWirtschaft(b, sorten, lager, herstellProzent = HERSTELL_PROZENT_
   const ohnePreis = new Set();
   let unbekannt = false;
   let kosten = 0;
+  let verpackung = 0;
   Object.entries(b.items || {}).forEach(([sid, q]) => {
     const so = sorten.find((x) => x.id === sid);
     if (!so) return;
     const k = stueckKosten(so, lager);
     kosten += (Number(q) || 0) * k.kosten;
+    verpackung += (Number(q) || 0) * zahl(so.verpackung);
     k.ohnePreis.forEach((n) => ohnePreis.add(n));
     if (k.unbekannt) unbekannt = true;
   });
   kosten = runden2(kosten);
+  verpackung = runden2(verpackung);
   const herstell = runden2((kosten * (Number(herstellProzent) || 0)) / 100);
   return {
     brutto,
@@ -866,8 +901,9 @@ function bestellWirtschaft(b, sorten, lager, herstellProzent = HERSTELL_PROZENT_
     db: runden2(netto - kosten), // Deckungsbeitrag nach Material
     herstellProzent: Number(herstellProzent) || 0,
     herstell, // Herstellungskosten
-    gewinn: runden2(netto - kosten - herstell),
-    gewinnOhneRabatt: runden2(brutto - kosten - herstell),
+    verpackung, // eigene Verpackung je Sorte (z.B. Sackerl + Schleife bei den Cookies)
+    gewinn: runden2(netto - kosten - herstell - verpackung),
+    gewinnOhneRabatt: runden2(brutto - kosten - herstell - verpackung),
     ohnePreis,
     unbekannt,
   };
@@ -1095,8 +1131,10 @@ function Wirtschaftlichkeit({ w, rabattLabel, nettoLabel = "Zu zahlen", mitRabat
   const anteil = (n) => (w.netto > 0 ? ` (${fmtProzent((n / w.netto) * 100)})` : "");
   const strich = { borderTop: `1px solid ${COL.line}`, paddingTop: 4, marginTop: 2 };
   const mitHerstellung = w.herstellProzent > 0;
-  const ergebnis = mitHerstellung ? w.gewinn : w.db;
-  const ergebnisOhneRabatt = mitHerstellung ? w.gewinnOhneRabatt : runden2(w.brutto - w.kosten);
+  const mitVerpackung = w.verpackung > 0;
+  const mitGewinn = mitHerstellung || mitVerpackung;
+  const ergebnis = mitGewinn ? w.gewinn : w.db;
+  const ergebnisOhneRabatt = mitGewinn ? w.gewinnOhneRabatt : runden2(w.brutto - w.kosten);
   const rabattDa = mitRabatt ?? w.rabattProzent > 0;
   const farbe = (n) => (n > 0 ? COL.ok : COL.warn);
   return (
@@ -1107,12 +1145,13 @@ function Wirtschaftlichkeit({ w, rabattLabel, nettoLabel = "Zu zahlen", mitRabat
       {zeile("Materialkosten", `−${fmtEUR(w.kosten)}`, { color: COL.inkMuted })}
       {zeile(`Deckungsbeitrag${anteil(w.db)}`, fmtEUR(w.db), { ...strich, fontWeight: 700, color: farbe(w.db) })}
       {mitHerstellung && zeile(`Herstellungskosten (${w.herstellProzent} % vom Material)`, `−${fmtEUR(w.herstell)}`, { color: COL.inkMuted })}
-      {mitHerstellung && zeile(`Gewinn${anteil(w.gewinn)}`, fmtEUR(w.gewinn), { ...strich, fontWeight: 700, fontSize: 15, color: farbe(w.gewinn) })}
+      {mitVerpackung && zeile("Verpackung", `−${fmtEUR(w.verpackung)}`, { color: COL.inkMuted })}
+      {mitGewinn && zeile(`Gewinn${anteil(w.gewinn)}`, fmtEUR(w.gewinn), { ...strich, fontWeight: 700, fontSize: 15, color: farbe(w.gewinn) })}
       <div className="text-xs mt-1" style={{ color: farbe(ergebnis) }}>
         {ergebnis > 0
           ? rabattDa
-            ? `✅ Trotz Rabatt bleiben dir ${fmtEUR(ergebnis)} ${mitHerstellung ? "Gewinn" : ""} – ohne Rabatt wären es ${fmtEUR(ergebnisOhneRabatt)}.`
-            : `✅ Dir bleiben ${fmtEUR(ergebnis)} ${mitHerstellung ? "Gewinn nach Material und Herstellung" : "nach den Materialkosten"}.`
+            ? `✅ Trotz Rabatt bleiben dir ${fmtEUR(ergebnis)} ${mitGewinn ? "Gewinn" : ""} – ohne Rabatt wären es ${fmtEUR(ergebnisOhneRabatt)}.`
+            : `✅ Dir bleiben ${fmtEUR(ergebnis)} ${mitGewinn ? `Gewinn nach Material${mitHerstellung ? ", Herstellung" : ""}${mitVerpackung ? " und Verpackung" : ""}` : "nach den Materialkosten"}.`
           : w.db > 0
           ? `⚠️ Das Material ist gedeckt, aber nicht die Herstellungskosten – Verlust ${fmtEUR(-ergebnis)}.`
           : `⚠️ Nicht einmal das Material ist gedeckt – Verlust ${fmtEUR(-ergebnis)}.`}
@@ -1145,7 +1184,7 @@ function BestellEditor({ start, sorten, kunden, lager, herstellProzent, letzteBe
   const kunde = kunden.find((k) => k.name.trim().toLowerCase() === kundeName.trim().toLowerCase());
   const letzte = kunde ? letzteBestellung(kunde.id) : null;
   const sichtbar = sorten.filter((s) => alleSorten || s.aktiv || (items[s.id] || 0) > 0);
-  const wirtschaft = useMemo(() => bestellWirtschaft({ items, rabatt }, sorten, lager, herstellProzent), [items, rabatt, sorten, lager, herstellProzent]);
+  const wirtschaft = useMemo(() => bestellWirtschaft({ items, rabatt, kundeId: kunde?.id }, sorten, lager, herstellProzent), [items, rabatt, kunde?.id, sorten, lager, herstellProzent]);
   const summe = wirtschaft.netto;
 
   const erkennen = () => {
@@ -1219,11 +1258,13 @@ function BestellEditor({ start, sorten, kunden, lager, herstellProzent, letzteBe
         <div className="flex flex-col">
           {sichtbar.map((s, i) => {
             const q = items[s.id] || 0;
+            const p = preisFuer(s, kunde?.id);
+            const sonder = p !== (Number(s.preis) || 0);
             return (
               <div key={s.id} className="flex items-center justify-between gap-2 py-2" style={{ borderTop: i ? `1px solid ${COL.line}` : "none" }}>
                 <div className="min-w-0">
                   <div className="font-medium truncate" style={{ color: q > 0 ? COL.ink : COL.inkMuted }}>{s.kurz} <span className="text-xs font-normal" style={{ color: COL.inkMuted }}>{s.name !== s.kurz ? s.name : ""}</span></div>
-                  <div className="text-xs" style={{ color: COL.inkMuted }}>{Number(s.preis) > 0 ? fmtEUR(Number(s.preis)) : "Preis fehlt"}{q > 0 && Number(s.preis) > 0 ? ` · ${fmtEUR(q * s.preis)}` : ""}</div>
+                  <div className="text-xs" style={{ color: COL.inkMuted }}>{p > 0 ? fmtEUR(p) : "Preis fehlt"}{sonder ? " (Sonderpreis)" : ""}{q > 0 && p > 0 ? ` · ${fmtEUR(q * p)}` : ""}</div>
                 </div>
                 <Stepper value={q} halbe={s.halbe} onChange={(v) => setItems({ ...items, [s.id]: v })} />
               </div>
@@ -1706,7 +1747,7 @@ function KundenzettelDruck({ backtag, sorten, kunden, mitPreisen }) {
                     <td style={{ width: 16, padding: "3px 2px" }}><Box /></td>
                     <td className="zahl" style={{ width: 34, padding: "3px 4px", fontSize: "12pt" }}>{fmtQty(b.items[s.id])}×</td>
                     <td style={{ padding: "3px 2px" }}>{s.name}</td>
-                    {mitPreisen && <td className="zahl" style={{ fontWeight: 400, padding: "3px 2px" }}>{Number(s.preis) > 0 ? fmtEUR(b.items[s.id] * s.preis) : ""}</td>}
+                    {mitPreisen && <td className="zahl" style={{ fontWeight: 400, padding: "3px 2px" }}>{preisFuer(s, b.kundeId) > 0 ? fmtEUR(b.items[s.id] * preisFuer(s, b.kundeId)) : ""}</td>}
                   </tr>
                 ))}
               </tbody>
@@ -1875,12 +1916,12 @@ function KassaTab({ backtag, sorten, kunden, lager, herstellProzent, updateBackt
   const mitRabatt = wListe.filter((x) => x.w.rabattProzent > 0);
   const tag = {
     brutto: summe("brutto"), rabatt: summe("rabatt"), netto: summe("netto"), kosten: summe("kosten"), db: summe("db"),
-    herstell: summe("herstell"), gewinn: summe("gewinn"), gewinnOhneRabatt: summe("gewinnOhneRabatt"),
+    herstell: summe("herstell"), verpackung: summe("verpackung"), gewinn: summe("gewinn"), gewinnOhneRabatt: summe("gewinnOhneRabatt"),
     herstellProzent: Number(herstellProzent) || 0, rabattProzent: 0, ohnePreis: new Set(wListe.flatMap((x) => [...x.w.ohnePreis])), unbekannt: wListe.some((x) => x.w.unbekannt),
   };
 
   const waLink = (b) => {
-    const zeilen = sorten.filter((s) => (b.items[s.id] || 0) > 0).map((s) => `${fmtQty(b.items[s.id])}× ${s.name} (${fmtEUR(b.items[s.id] * s.preis)})`);
+    const zeilen = sorten.filter((s) => (b.items[s.id] || 0) > 0).map((s) => `${fmtQty(b.items[s.id])}× ${s.name} (${fmtEUR(b.items[s.id] * preisFuer(s, b.kundeId))})`);
     const rabattZeilen = Number(b.rabatt) > 0 ? `\nSumme: ${fmtEUR(bestellBrutto(b, sorten))}\nRabatt ${b.rabatt} %: −${fmtEUR(bestellRabatt(b, sorten))}` : "";
     const text = `Hallo ${kName(b.kundeId).split(" ")[0]}! 🍞\nDeine Bestellung für ${fmtDatum(backtag.datum)}:\n${zeilen.join("\n")}${rabattZeilen}\nZu zahlen: ${fmtEUR(bestellSumme(b, sorten))}\n\nLiebe Grüße, Börni's Backstube`;
     return `https://wa.me/?text=${encodeURIComponent(text)}`;
@@ -1926,7 +1967,7 @@ function KassaTab({ backtag, sorten, kunden, lager, herstellProzent, updateBackt
                 {sorten.filter((s) => (b.items[s.id] || 0) > 0).map((s) => (
                   <span key={s.id}>
                     <b style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtQty(b.items[s.id])}×</b> {s.name}{" "}
-                    <span style={{ color: COL.inkMuted }}>{Number(s.preis) > 0 ? fmtEUR(b.items[s.id] * s.preis) : "(Preis fehlt)"}</span>
+                    <span style={{ color: COL.inkMuted }}>{preisFuer(s, b.kundeId) > 0 ? fmtEUR(b.items[s.id] * preisFuer(s, b.kundeId)) : "(Preis fehlt)"}</span>
                   </span>
                 ))}
               </div>
@@ -2019,7 +2060,7 @@ function EinstellungenTab({ daten, setDaten, lager, config, onReloadLager, onDis
                     <button onClick={() => move(idx, 1)} className="text-xs px-1" style={{ color: COL.inkMuted }} aria-label="nach unten">▼</button>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                   <div className="col-span-2">
                     <Field label="Rezept">
                       <select style={{ ...inputStyle, borderColor: rez ? COL.line : COL.warn }} value={rez ? rez.name : ""} onChange={(e) => upd(s.id, { rezept: e.target.value })}>
@@ -2034,6 +2075,9 @@ function EinstellungenTab({ daten, setDaten, lager, config, onReloadLager, onDis
                   <Field label="Preis €">
                     <input style={{ ...inputStyle, borderColor: Number(s.preis) > 0 ? COL.line : COL.amber }} inputMode="decimal" value={s.preis ?? ""} onChange={(e) => upd(s.id, { preis: e.target.value.replace(",", ".") })} />
                   </Field>
+                  <Field label="Verpackung €">
+                    <input style={inputStyle} inputMode="decimal" value={s.verpackung ?? ""} placeholder="0" onChange={(e) => upd(s.id, { verpackung: e.target.value.replace(",", ".") })} aria-label="Verpackungskosten pro Stück bzw. Packung" />
+                  </Field>
                 </div>
                 {(s.extras || []).map((x, xi) => {
                   // Wert im Auswahlfeld: "r:Rezeptname" oder "m:Rohstoffname"
@@ -2047,7 +2091,7 @@ function EinstellungenTab({ daten, setDaten, lager, config, onReloadLager, onDis
                   };
                   return (
                   <div key={xi} className="flex items-end gap-2 mt-2">
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                       <Field label="Extra: Füllung/Topping (Rezept) oder Zugabe (Rohstoff)">
                         <select style={{ ...inputStyle, borderColor: wert ? COL.line : COL.warn }} value={wert} onChange={(e) => setzen(e.target.value)}>
                           <option value="">– wählen –</option>
@@ -2069,10 +2113,61 @@ function EinstellungenTab({ daten, setDaten, lager, config, onReloadLager, onDis
                   </div>
                   );
                 })}
+                {Object.entries(s.sonderpreise || {}).map(([kid, sp]) => (
+                  <div key={kid} className="flex items-end gap-2 mt-2">
+                    <div className="flex-1 min-w-0">
+                      <Field label="Sonderpreis für Kunde">
+                        <select
+                          style={{ ...inputStyle, borderColor: daten.kunden.some((k) => k.id === kid) ? COL.line : COL.warn }}
+                          value={kid}
+                          onChange={(e) => {
+                            const neu = { ...s.sonderpreise };
+                            delete neu[kid];
+                            upd(s.id, { sonderpreise: { ...neu, [e.target.value]: sp } });
+                          }}
+                        >
+                          {!daten.kunden.some((k) => k.id === kid) && <option value={kid}>– Kunde gelöscht –</option>}
+                          {[...daten.kunden]
+                            .filter((k) => k.id === kid || !(k.id in s.sonderpreise))
+                            .sort((a, b) => a.name.localeCompare(b.name, "de"))
+                            .map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
+                        </select>
+                      </Field>
+                    </div>
+                    <div style={{ width: 90 }}>
+                      <Field label="Preis €">
+                        <input style={inputStyle} inputMode="decimal" value={sp ?? ""} onChange={(e) => upd(s.id, { sonderpreise: { ...s.sonderpreise, [kid]: e.target.value.replace(",", ".") } })} />
+                      </Field>
+                    </div>
+                    <button
+                      className="pb-3"
+                      style={{ color: COL.warn }}
+                      onClick={() => {
+                        const neu = { ...s.sonderpreise };
+                        delete neu[kid];
+                        upd(s.id, { sonderpreise: neu });
+                      }}
+                      aria-label="Sonderpreis entfernen"
+                    >
+                      <IcX size={16} />
+                    </button>
+                  </div>
+                ))}
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3 text-sm">
                   <label className="flex items-center gap-1.5"><input type="checkbox" checked={s.aktiv} onChange={(e) => upd(s.id, { aktiv: e.target.checked })} /> aktiv</label>
                   <label className="flex items-center gap-1.5"><input type="checkbox" checked={!!s.halbe} onChange={(e) => upd(s.id, { halbe: e.target.checked })} /> halbe möglich</label>
                   <button style={{ color: COL.accent }} onClick={() => upd(s.id, { extras: [...(s.extras || []), { rezept: "", g: "" }] })}>+ Extra</button>
+                  {daten.kunden.some((k) => !(k.id in (s.sonderpreise || {}))) && (
+                    <button
+                      style={{ color: COL.accent }}
+                      onClick={() => {
+                        const frei = [...daten.kunden].sort((a, b) => a.name.localeCompare(b.name, "de")).find((k) => !(k.id in (s.sonderpreise || {})));
+                        upd(s.id, { sonderpreise: { ...(s.sonderpreise || {}), [frei.id]: s.preis ?? "" } });
+                      }}
+                    >
+                      + Sonderpreis
+                    </button>
+                  )}
                   <button style={{ color: COL.warn }} className="ml-auto" onClick={() => window.confirm(`Sorte „${s.kurz}“ löschen?`) && setSorten((ss) => ss.filter((x) => x.id !== s.id))}>Löschen</button>
                 </div>
                 <div className="mt-2">
