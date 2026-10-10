@@ -431,14 +431,22 @@ const SORTEN_UPDATES = [
       });
     },
   },
+  {
+    // Börni (10.10.2026): Herstellungskosten 90 % statt 100 % der Materialkosten
+    id: "2026-10-herstellung-90",
+    datenAnwenden: (daten) => ({ ...daten, herstellProzent: 90 }),
+  },
 ];
 function sortenAktualisieren(daten) {
   const erledigt = daten.sortenUpdates || [];
   const offen = SORTEN_UPDATES.filter((u) => !erledigt.includes(u.id));
   if (!offen.length) return daten;
-  let sorten = daten.sorten;
-  offen.forEach((u) => (sorten = u.anwenden(sorten)));
-  return { ...daten, sorten, sortenUpdates: [...erledigt, ...offen.map((u) => u.id)] };
+  let d = daten;
+  offen.forEach((u) => {
+    if (u.anwenden) d = { ...d, sorten: u.anwenden(d.sorten) };
+    if (u.datenAnwenden) d = u.datenAnwenden(d);
+  });
+  return { ...d, sortenUpdates: [...erledigt, ...offen.map((u) => u.id)] };
 }
 
 const leereDaten = () => ({ version: 1, sorten: STANDARD_SORTEN, sortenUpdates: SORTEN_UPDATES.map((u) => u.id), kunden: [], backtage: [] });
@@ -824,7 +832,7 @@ function stueckKosten(sorte, lager) {
   return { kosten, ohnePreis, unbekannt };
 }
 // Herstellungskosten (Strom, Arbeitszeit, Verpackung) als Prozent der Materialkosten – laut Börni ca. gleich viel wie das Material
-const HERSTELL_PROZENT_STANDARD = 100;
+const HERSTELL_PROZENT_STANDARD = 90;
 const herstellProzentVon = (daten) => {
   const p = Number(daten?.herstellProzent);
   return isFinite(p) && daten?.herstellProzent !== undefined && daten?.herstellProzent !== "" ? p : HERSTELL_PROZENT_STANDARD;
