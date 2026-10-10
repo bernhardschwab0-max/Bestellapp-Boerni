@@ -285,12 +285,24 @@ function expandVorteige(items, materials, depth = 0) {
 // ---------- Standard-Sorten (Kürzel wie in deiner Verkaufsliste) ----------
 // rezept = Rezeptname in der Lager-App; gProStueck leer = Teiggewicht aus dem Rezept
 // Cookies (10.10.2026): 4er-Packung (4 × 60 g Teig) im Sackerl mit selbstgemachter Schleife – Verpackung 0,25 €/Packung.
-// 4,00 € pro Packung, im Hofladen 3,80 € (Sonderpreis, wird beim Update für den Kunden "Hofladen" eingetragen).
+// 4,00 € pro Packung, im Hofladen 3,80 € (Sonderpreis, wird beim Update für den Hofladen-Kunden eingetragen).
 const COOKIE_SORTEN = [
   { kurz: "Cook.H", name: "Cookies Hell (4er)", rezept: "Cookies Hell", gProStueck: "240", verpackung: "0.25", preis: 4.0, aliases: "cookies hell, helle cookies, cookie hell" },
   { kurz: "Cook.D", name: "Cookies Dunkel (4er)", rezept: "Cookies Dunkel", gProStueck: "240", verpackung: "0.25", preis: 4.0, aliases: "cookies dunkel, dunkle cookies, cookie dunkel, schoko cookies, kakao cookies" },
 ];
 const HOFLADEN_COOKIE_PREIS = 3.8;
+// Den Hofladen-Kunden über einen Prüfwert eines Namensworts erkennen (FNV-1a) –
+// so steht kein Kundenname im öffentlichen Code
+function wortPruefwert(w) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < w.length; i++) {
+    h ^= w.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h;
+}
+const HOFLADEN_KUNDE_PRUEFWERT = 0x5d818011;
+const istHofladenKunde = (k) => normalizeName(k?.name).split(" ").some((w) => wortPruefwert(w) === HOFLADEN_KUNDE_PRUEFWERT);
 
 const STANDARD_SORTEN = [
   { kurz: "Bauern", name: "Bauernbrot", rezept: "Bauernbrot", preis: 4.2, halbe: true, aliases: "bauernbrot" },
@@ -450,7 +462,7 @@ const SORTEN_UPDATES = [
     id: "2026-10-cookies",
     datenAnwenden: (daten) => {
       let kunden = daten.kunden || [];
-      let hof = kunden.find((k) => normalizeName(k.name) === normalizeName("Hofladen"));
+      let hof = kunden.find(istHofladenKunde) || kunden.find((k) => normalizeName(k.name) === normalizeName("Hofladen"));
       if (!hof) {
         hof = { id: uid(), name: "Hofladen" };
         kunden = [...kunden, hof];
@@ -461,6 +473,28 @@ const SORTEN_UPDATES = [
       const iApfel = sorten.findIndex((x) => normalizeName(x.kurz) === normalizeName("Apfel") || normalizeName(x.name) === normalizeName("Apfelschnecke"));
       sorten.splice(iApfel >= 0 ? iApfel + 1 : sorten.length, 0, ...neu);
       return { ...daten, kunden, sorten };
+    },
+  },
+  {
+    // Der Hofladen hat schon einen eigenen Kundeneintrag: Sonderpreise und Bestellungen vom neu angelegten
+    // "Hofladen" dorthin übertragen und den doppelten Kunden löschen
+    id: "2026-10-hofladen-kunde",
+    datenAnwenden: (daten) => {
+      const kunden = daten.kunden || [];
+      const neu = kunden.find((k) => normalizeName(k.name) === normalizeName("Hofladen"));
+      const echt = kunden.find((k) => k !== neu && istHofladenKunde(k));
+      if (!neu || !echt) return daten;
+      const sorten = daten.sorten.map((s) => {
+        if (!s.sonderpreise || !(neu.id in s.sonderpreise)) return s;
+        const { [neu.id]: preis, ...rest } = s.sonderpreise;
+        return { ...s, sonderpreise: { ...rest, [echt.id]: rest[echt.id] ?? preis } };
+      });
+      const backtage = daten.backtage.map((bt) =>
+        (bt.bestellungen || []).some((b) => b.kundeId === neu.id)
+          ? { ...bt, bestellungen: bt.bestellungen.map((b) => (b.kundeId === neu.id ? { ...b, kundeId: echt.id } : b)) }
+          : bt
+      );
+      return { ...daten, sorten, backtage, kunden: kunden.filter((k) => k.id !== neu.id) };
     },
   },
 ];
