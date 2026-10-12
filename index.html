@@ -2492,22 +2492,20 @@ function App() {
     return () => { cancelled = true; };
   }, [config, ladeVersuch]);
 
-  // Speichern mit Abgleich: ist der eigene Stand älter als 2 Minuten, zuerst nachsehen, ob ein anderes Gerät
-  // inzwischen gespeichert hat – dann beide Änderungen zusammenführen statt zu überschreiben.
+  // Speichern mit Abgleich: vor JEDEM Speichern nachsehen, ob ein anderes Gerät inzwischen gespeichert hat –
+  // dann beide Änderungen zusammenführen statt zu überschreiben (kostet einen Lesezugriff pro Speichern).
   const speichern = async (mein) => {
     const c = latestRef.current.config;
     let ziel = mein;
-    if (Date.now() - basisZeitRef.current > 2 * 60 * 1000) {
-      const cloud = await binRead(c.apiKey, c.bestellBin);
-      if (cloud.ersetztDurch) {
-        umziehen(c, cloud.ersetztDurch);
-        throw new Error("Speicher wurde zusammengeführt – deine letzte Änderung bitte nochmal eintragen");
-      }
-      const dein = bestellNormalisieren(cloud);
-      if (!gleichJson(dein, basisRef.current)) {
-        ziel = abgleichen(basisRef.current, mein, dein);
-        setAbgleichInfo(cloud._stand || { zeit: new Date().toISOString() });
-      }
+    const cloud = await binRead(c.apiKey, c.bestellBin);
+    if (cloud.ersetztDurch) {
+      umziehen(c, cloud.ersetztDurch);
+      throw new Error("Speicher wurde zusammengeführt – deine letzte Änderung bitte nochmal eintragen");
+    }
+    const dein = bestellNormalisieren(cloud);
+    if (!gleichJson(dein, basisRef.current)) {
+      ziel = abgleichen(basisRef.current, mein, dein);
+      setAbgleichInfo(cloud._stand || { zeit: new Date().toISOString() });
     }
     const stand = neuerStand();
     await binWrite(c.apiKey, c.bestellBin, { ...ziel, _stand: stand });
