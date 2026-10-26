@@ -1,0 +1,2856 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Börni's Backstube · Bestellungen</title>
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#3B2A1E">
+<link rel="icon" href="./icon-192.png">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Bestellungen">
+<meta name="mobile-web-app-capable" content="yes">
+<script>
+  window.addEventListener('error', function (e) {
+    var root = document.getElementById('root');
+    if (root && !root.dataset.rendered) {
+      root.innerHTML = '<div style="padding:24px;font-family:monospace;white-space:pre-wrap;color:#B3401D;background:#FBEAE2;max-width:700px;margin:40px auto;border-radius:8px;line-height:1.5;">' +
+        '<strong>Fehler beim Laden der App:</strong>\n\n' + (e.message || 'Unbekannter Fehler') +
+        '\n\nDatei: ' + (e.filename || '-') + ' Zeile: ' + (e.lineno || '-') +
+        '\n\nBitte mach einen Screenshot von diesem Text.</div>';
+    }
+  });
+  // Selbstheilung: Laden die Programmbibliotheken nicht (z.B. kaputter Offline-Speicher),
+  // wird der Offline-Speicher geleert und die Seite einmal neu geladen. Deine Daten bleiben erhalten.
+  window.addEventListener('load', function () {
+    var flag = 'selbstheilung';
+    var ss = null;
+    try { ss = window.sessionStorage; } catch (e) {}
+    if (window.React && window.ReactDOM && window.Babel) { if (ss) ss.removeItem(flag); return; }
+    if (!ss || ss.getItem(flag)) {
+      var root = document.getElementById('root');
+      if (root) root.innerHTML = '<div style="padding:24px;font-family:sans-serif;color:#B3401D;background:#FBEAE2;max-width:500px;margin:60px auto;border-radius:12px;line-height:1.5;text-align:center;">' +
+        '<b>Die App konnte nicht geladen werden.</b><br>Bitte Internetverbindung prüfen und die App neu öffnen.</div>';
+      return;
+    }
+    ss.setItem(flag, '1');
+    var aufgaben = [];
+    if (navigator.serviceWorker) aufgaben.push(navigator.serviceWorker.getRegistrations().then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister(); })); }));
+    if (window.caches) aufgaben.push(caches.keys().then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); }));
+    Promise.all(aufgaben).catch(function () {}).then(function () { location.reload(); });
+  });
+</script>
+<script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<script crossorigin="anonymous" integrity="sha384-mZT2gIty7ZDdOGkxfP6joZcYdMW1Jvj9dRlfpTmaJAKKXTqzygtB22k7FLe+KZC1" src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Zilla+Slab:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  body { margin: 0; background: #FAF3E7; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+  @keyframes rise { 0% { transform: scale(.9); opacity: .6; } 50% { transform: scale(1.08); opacity: 1; } 100% { transform: scale(.9); opacity: .6; } }
+  .bottom-nav { padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+  input[type=number]::-webkit-inner-spin-button { opacity: 1; }
+  /* ---------- Drucken ---------- */
+  .druck-overlay { position: fixed; inset: 0; z-index: 50; overflow: auto; background: #E9E2D6; }
+  .druck-blatt { background: #fff; color: #111; width: 210mm; max-width: 100%; margin: 0 auto 24px; padding: 12mm; box-shadow: 0 4px 24px rgba(0,0,0,0.12); font-family: 'IBM Plex Sans', sans-serif; font-size: 10.5pt; line-height: 1.35; }
+  .druck-blatt.quer { width: 297mm; }
+  .druck-blatt h1 { font-family: 'Fraunces', serif; font-weight: 700; font-size: 20pt; line-height: 1.1; }
+  .druck-blatt h2 { font-family: 'Fraunces', serif; font-weight: 600; font-size: 13pt; margin: 14px 0 6px; padding-bottom: 3px; border-bottom: 2px solid #111; break-after: avoid; page-break-after: avoid; }
+  .druck-blatt tr { break-inside: avoid; }
+  .druck-blatt table { width: 100%; border-collapse: collapse; }
+  .druck-blatt th { text-align: left; font-size: 8.5pt; text-transform: uppercase; letter-spacing: .04em; color: #555; border-bottom: 1.5px solid #111; padding: 3px 4px; }
+  .druck-blatt td { border-bottom: 1px solid #ccc; padding: 4px; vertical-align: top; }
+  .druck-blatt .zahl { text-align: right; font-family: 'IBM Plex Mono', monospace; font-weight: 600; white-space: nowrap; }
+  .druck-blatt .box { display: inline-block; width: 11px; height: 11px; border: 1.5px solid #111; border-radius: 2px; vertical-align: -1px; }
+  .druck-spalten { column-count: 2; column-gap: 8mm; }
+  .druck-block { break-inside: avoid; display: inline-block; width: 100%; margin-bottom: 4mm; }
+  .zettel-raster { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+  .zettel { border: 1px dashed #888; padding: 5mm; break-inside: avoid; }
+  @media (max-width: 800px) { .druck-blatt { padding: 6mm; font-size: 9.5pt; } }
+  @media print {
+    body { background: #fff !important; }
+    .screen-only, .no-print { display: none !important; }
+    .druck-overlay { position: static !important; overflow: visible !important; background: #fff !important; }
+    .druck-blatt { width: auto !important; max-width: none !important; margin: 0 !important; padding: 0 !important; box-shadow: none !important; }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+</style>
+</head>
+<body>
+<div id="root">
+  <div style="padding:24px;font-family:sans-serif;color:#8A8073;max-width:500px;margin:60px auto;text-align:center;">
+    Lade die App …
+  </div>
+</div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo, useRef } = React;
+
+// ---------- Einstellungen ----------
+const LAGER_APP_URL = "https://bernhardschwab0-max.github.io/Lagerapp-B-rni/";
+const MAX_BACKTAGE = 26; // ältere Backtage werden beim Speichern entfernt (jsonbin-Gratislimit 100 kb)
+
+// ---------- Design (wie Lager-App) ----------
+const COL = {
+  bg: "#FAF3E7",
+  surface: "#FFFFFF",
+  ink: "#2E2118",
+  inkMuted: "#8C7C68",
+  line: "#EADFC9",
+  accent: "#C4622D",
+  accentSoft: "#F9E7D8",
+  crust: "#3B2A1E",
+  wheat: "#E8B64C",
+  warn: "#B3401D",
+  warnSoft: "#FBEAE2",
+  ok: "#55804A",
+  okSoft: "#E9F1E4",
+  amber: "#A9720C",
+  amberSoft: "#FBF1DE",
+};
+const inputStyle = {
+  border: `1px solid ${COL.line}`,
+  borderRadius: "10px",
+  padding: "9px 11px",
+  fontFamily: "'IBM Plex Sans', sans-serif",
+  fontSize: "15px",
+  color: COL.ink,
+  backgroundColor: "#fff",
+  outline: "none",
+  minWidth: 0,
+};
+
+function Icon({ size = 18, strokeWidth = 2, children }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+      {children}
+    </svg>
+  );
+}
+const IcList = (p) => (<Icon {...p}><path d="M9 6h11M9 12h11M9 18h11" /><circle cx="4" cy="6" r="1" /><circle cx="4" cy="12" r="1" /><circle cx="4" cy="18" r="1" /></Icon>);
+const IcBread = (p) => (<Icon {...p}><path d="M4 11a4 4 0 0 1 2-7h12a4 4 0 0 1 2 7v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z" /><path d="M9 9v6M15 9v6" /></Icon>);
+const IcUsers = (p) => (<Icon {...p}><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0" /><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6" /></Icon>);
+const IcGear = (p) => (<Icon {...p}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></Icon>);
+const IcPlus = (p) => (<Icon {...p}><path d="M12 5v14M5 12h14" /></Icon>);
+const IcMinus = (p) => (<Icon {...p}><path d="M5 12h14" /></Icon>);
+const IcX = (p) => (<Icon {...p}><path d="M18 6 6 18M6 6l12 12" /></Icon>);
+const IcEdit = (p) => (<Icon {...p}><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></Icon>);
+const IcTrash = (p) => (<Icon {...p}><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" /></Icon>);
+const IcPrint = (p) => (<Icon {...p}><path d="M6 9V2h12v7" /><rect x="6" y="14" width="12" height="8" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /></Icon>);
+const IcBox = (p) => (<Icon {...p}><path d="M21 8 12 3 3 8v8l9 5 9-5z" /><path d="m3 8 9 5 9-5M12 13v8" /></Icon>);
+const IcSend = (p) => (<Icon {...p}><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z" /></Icon>);
+
+function WheatLogo({ size = 40, color = COL.wheat }) {
+  const grains = [0, 1, 2, 3, 4];
+  return (
+    <svg width={size} height={size} viewBox="0 0 40 48" fill={color} aria-hidden="true">
+      <path d="M21 47 C20 38 20.5 30 22 20" stroke={color} strokeWidth="1.6" fill="none" strokeLinecap="round" />
+      {grains.map((i) => {
+        const y = 34 - i * 6;
+        return (
+          <g key={i}>
+            <ellipse cx={16.5 + i * 0.4} cy={y} rx="3.2" ry="6" transform={`rotate(-32 ${16.5 + i * 0.4} ${y})`} />
+            <ellipse cx={26 + i * 0.1} cy={y - 2} rx="3.2" ry="6" transform={`rotate(28 ${26 + i * 0.1} ${y - 2})`} />
+          </g>
+        );
+      })}
+      <ellipse cx="22.5" cy="6" rx="3" ry="5.5" transform="rotate(8 22.5 6)" />
+    </svg>
+  );
+}
+function Brand({ light = false, small = false }) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <WheatLogo size={small ? 30 : 40} color={light ? COL.wheat : COL.accent} />
+      <div style={{ fontFamily: "'Zilla Slab', serif", lineHeight: 1, color: light ? "#fff" : COL.crust }}>
+        <div style={{ fontSize: small ? 20 : 24, fontWeight: 700, letterSpacing: "0.02em" }}>BÖRNI´S</div>
+        <div style={{ fontSize: small ? 10.5 : 12, fontWeight: 600, letterSpacing: "0.42em", marginTop: 2 }}>BACKSTUBE</div>
+      </div>
+    </div>
+  );
+}
+
+function Card({ children, className = "", style }) {
+  return (
+    <div
+      className={`rounded-2xl p-4 sm:p-5 print-card ${className}`}
+      style={{ backgroundColor: COL.surface, border: `1px solid ${COL.line}`, boxShadow: "0 1px 2px rgba(38,32,25,0.04), 0 1px 12px rgba(38,32,25,0.03)", ...style }}
+    >
+      {children}
+    </div>
+  );
+}
+function H2({ children, right }) {
+  return (
+    <div className="flex items-center justify-between gap-2 mb-3">
+      <h2 className="text-lg" style={{ fontFamily: "'Fraunces', serif", fontWeight: 600 }}>{children}</h2>
+      {right}
+    </div>
+  );
+}
+function Btn({ children, onClick, primary, danger, small, disabled, className = "", title }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={`inline-flex items-center justify-center gap-1.5 font-medium rounded-xl transition-all ${small ? "text-xs px-2.5 py-1.5" : "text-sm px-3.5 py-2.5"} ${className}`}
+      style={{
+        backgroundColor: primary ? COL.accent : COL.surface,
+        color: primary ? "#fff" : danger ? COL.warn : COL.ink,
+        border: `1px solid ${primary ? COL.accent : COL.line}`,
+        boxShadow: primary ? "0 2px 8px rgba(196,98,45,0.3)" : "none",
+        opacity: disabled ? 0.5 : 1,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+function Field({ label, children, hint }) {
+  return (
+    <label className="flex flex-col gap-1 text-sm">
+      <span style={{ color: COL.inkMuted }}>{label}</span>
+      {children}
+      {hint && <span className="text-xs" style={{ color: COL.inkMuted }}>{hint}</span>}
+    </label>
+  );
+}
+
+// ---------- Helfer ----------
+const uid = () => Math.random().toString(36).slice(2, 9);
+const fmtEUR = (n) => (isFinite(n) ? n.toLocaleString("de-DE", { style: "currency", currency: "EUR" }) : "–");
+const fmtNum = (n, d = 1) => (isFinite(n) ? n.toLocaleString("de-DE", { maximumFractionDigits: d }) : "–");
+// Bis 10 kg in Gramm (zum Abwiegen genauer), darüber in kg
+const fmtG = (n) => (!isFinite(n) ? "–" : n >= 10000 ? `${fmtNum(n / 1000, 2)} kg` : `${fmtNum(n, n < 100 ? 1 : 0)} g`);
+const fmtQty = (q) => (q === 0.5 ? "½" : Number.isInteger(q) ? String(q) : String(q).replace(".", ",").replace(",5", "½"));
+const WOCHENTAGE = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+const fmtDatum = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso + "T12:00:00");
+  return `${WOCHENTAGE[d.getDay()]}, ${d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" })}`;
+};
+const isoHeute = () => new Date().toISOString().slice(0, 10);
+const plusTage = (iso, n) => {
+  const d = new Date(iso + "T12:00:00");
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+
+function normalizeName(s) {
+  return (s || "")
+    .toLowerCase()
+    .replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue").replace(/ß/g, "ss")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  const dp = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
+  return dp[m][n];
+}
+function nameSimilarity(a, b) {
+  const na = normalizeName(a), nb = normalizeName(b);
+  if (!na || !nb) return 0;
+  if (na === nb) return 1;
+  if (na.length >= 3 && nb.length >= 3 && (na.startsWith(nb) || nb.startsWith(na))) return 0.9;
+  if (na.length >= 4 && nb.length >= 4 && (na.includes(nb) || nb.includes(na))) return 0.8;
+  return 1 - levenshtein(na, nb) / Math.max(na.length, nb.length);
+}
+
+// Löst Vorstufen (Sauerteig, Kochstück …) rekursiv in echte Lager-Rohstoffe auf (wie in der Lager-App)
+function expandVorteige(items, materials, depth = 0) {
+  if (depth > 5) return items;
+  const result = new Map();
+  for (const it of items) {
+    const mat = materials.find((m) => m.id === it.materialId);
+    if (mat && mat.vorteig && mat.vorteig.teile && mat.vorteig.teile.length > 0) {
+      const sub = mat.vorteig.teile.map((t) => ({ materialId: t.materialId, menge: it.menge * t.anteil }));
+      expandVorteige(sub, materials, depth + 1).forEach((e) => result.set(e.materialId, (result.get(e.materialId) || 0) + e.menge));
+    } else {
+      result.set(it.materialId, (result.get(it.materialId) || 0) + it.menge);
+    }
+  }
+  return [...result.entries()].map(([materialId, menge]) => ({ materialId, menge }));
+}
+
+// ---------- Standard-Sorten (Kürzel wie in deiner Verkaufsliste) ----------
+// Nur die Vorlage für einen ganz neuen Bestell-Speicher. Deine echten Sorten – mit Gramm, Zugaben,
+// Verpackung und Sonderpreisen – liegen in deinem Online-Speicher und stehen nicht im öffentlichen Code.
+// rezept = Rezeptname in der Lager-App; gProStueck leer = Teiggewicht aus dem Rezept
+const STANDARD_SORTEN = [
+  { kurz: "Bauern", name: "Bauernbrot", rezept: "Bauernbrot", preis: 4.2, halbe: true, aliases: "bauernbrot" },
+  { kurz: "Dinkel", name: "Dinkelbrot", rezept: "Dinkelpur", preis: 4.2, halbe: true, aliases: "dinkelpur, dinkelbrot" },
+  { kurz: "RT", name: "Roggentraum", rezept: "Roggentraum", preis: 4.5, halbe: true, aliases: "roggentraum, roggen traum" },
+  { kurz: "Zeitlos", name: "Zeitlos", rezept: "Zeitlos", preis: 4.5, halbe: true, aliases: "" },
+  { kurz: "Nuss", name: "Nussbrot", rezept: "Bauernbrot", preis: 5.0, halbe: true, aliases: "nussbrot, nussbrote, walnussbrot" },
+  { kurz: "Dinkl", name: "Dinkelkrusti", rezept: "Dinkelkrusti", preis: 1.0, aliases: "dinkelkrusti, krusti, dinkelweckerl" },
+  { kurz: "Mehrk.", name: "Mehrkorn", rezept: "Kornspitz", preis: 1.5, aliases: "mehrkorn, mehrkornweckerl" },
+  { kurz: "D.Knolle", name: "Dinkelknolle", rezept: "Wurzelbrot", preis: 1.5, aliases: "dinkelknolle, knolle" },
+  { kurz: "Käse", name: "Käseweckerl", rezept: "Semmelteig", preis: 1.5, aliases: "kaese, käseweckerl, käsestangerl" },
+  { kurz: "Speck", name: "Speckweckerl", rezept: "Semmelteig", preis: 2.0, aliases: "speckweckerl, speckstangerl" },
+  { kurz: "SchiKä", name: "Schinken-Käse", rezept: "Semmelteig", preis: 2.0, aliases: "schinken käse, schinkenkäse, schinken-käse" },
+  { kurz: "Kn Cia", name: "Knoblauch-Ciabatta", rezept: "Knoblauch Dinkelciabatta", preis: 4.0, aliases: "knoblauch ciabatta, knoblauchciabatta, ciabatta, knobi" },
+  { kurz: "Strizl", name: "Striezel", rezept: "Brioche", preis: 6.0, aliases: "striezel, brioche striezel" },
+  { kurz: "Zimz", name: "Zimtschnecke", rezept: "Brioche", preis: 3.5, aliases: "zimt, zimtschnecke, zimtschnecken" },
+  { kurz: "Mohn", name: "Mohnkipferl", rezept: "Brioche", preis: 3.5, aliases: "mohnkipferl, mohnflesserl" },
+  { kurz: "Apfel", name: "Apfelschnecke", rezept: "Brioche", preis: 3.5, aliases: "apfelschnecke, apfelschnecken, apfel schnecke, apfel-zimtschnecke" },
+  { kurz: "Kürbis", name: "Topfen-Kürbis", rezept: "Topfen-Kürbis", preis: 1.5, aktiv: false, aliases: "topfen kürbis, kürbisweckerl, topfen-kürbis" },
+  { kurz: "VK", name: "Vollkornbrot", rezept: "Vollkornbrot", preis: 4.2, halbe: true, aktiv: false, aliases: "vollkorn, vollkornbrot" },
+  { kurz: "Rp", name: "Roggenpur", rezept: "Roggenpur", preis: 4.2, halbe: true, aktiv: false, aliases: "roggenpur, roggenbrot" },
+  { kurz: "Christl", name: "A Christel", rezept: "A Christel", preis: 4.0, halbe: true, aktiv: false, aliases: "christel, a christel" },
+  { kurz: "Korn", name: "Kornspitz", rezept: "Kornspitz", preis: 1.0, aktiv: false, aliases: "kornspitz" },
+  { kurz: "Cook.H", name: "Cookies Hell (4er)", rezept: "Cookies Hell", preis: 4.0, aliases: "cookies hell, helle cookies, cookie hell" },
+  { kurz: "Cook.D", name: "Cookies Dunkel (4er)", rezept: "Cookies Dunkel", preis: 4.0, aliases: "cookies dunkel, dunkle cookies, cookie dunkel, schoko cookies, kakao cookies" },
+].map((s) => ({ id: uid(), gProStueck: "", extras: [], aktiv: true, halbe: false, ...s }));
+
+// Einmalige Anpassungen an schon eingerichteten Sorten (laufen beim Laden, gemerkt in daten.sortenUpdates).
+// Alle bisherigen Anpassungen (Oktober 2026) sind in deinem Speicher übernommen.
+const SORTEN_UPDATES = [];
+function sortenAktualisieren(daten) {
+  const erledigt = daten.sortenUpdates || [];
+  const offen = SORTEN_UPDATES.filter((u) => !erledigt.includes(u.id));
+  if (!offen.length) return daten;
+  let d = daten;
+  offen.forEach((u) => {
+    if (u.anwenden) d = { ...d, sorten: u.anwenden(d.sorten) };
+    if (u.datenAnwenden) d = u.datenAnwenden(d);
+  });
+  return { ...d, sortenUpdates: [...erledigt, ...offen.map((u) => u.id)] };
+}
+
+const leereDaten = () => ({ version: 1, sorten: STANDARD_SORTEN, sortenUpdates: SORTEN_UPDATES.map((u) => u.id), kunden: [], backtage: [] });
+
+// ---------- Speicher (jsonbin.io) ----------
+// Bestell-Daten liegen in einem eigenen Speicher. Rezepte & Rohstoffe werden aus dem Speicher der Lager-App nur GELESEN.
+function parseSetup(text) {
+  const t = (text || "").trim();
+  const m = t.match(/#setup=([^\s]+)/);
+  if (!m) return null;
+  try {
+    const parts = atob(decodeURIComponent(m[1])).split("|");
+    if (parts.length >= 2 && parts[0] && parts[1]) return { apiKey: parts[0], lagerBin: parts[1], bestellBin: parts[2] || "" };
+  } catch (e) {}
+  return null;
+}
+function getConfig() {
+  try {
+    if (window.location.hash.startsWith("#setup=")) {
+      const c = parseSetup(window.location.hash);
+      let vorher = null;
+      try { vorher = JSON.parse(localStorage.getItem("bestellapp_config") || "null"); } catch (e) {}
+      // Schutz: ein fremder Link darf die App nicht unbemerkt auf einen anderen Speicher umstellen
+      if (
+        c && c.bestellBin &&
+        (!vorher || vorher.bestellBin === c.bestellBin ||
+          window.confirm("Achtung: Dieser Link verbindet die App mit einem ANDEREN Online-Speicher.\n\nNur bestätigen, wenn der Link von deinem eigenen Gerät stammt. Fortfahren?"))
+      ) saveConfig(c);
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+    const raw = localStorage.getItem("bestellapp_config");
+    if (raw) {
+      const c = JSON.parse(raw);
+      if (c.apiKey && c.lagerBin && c.bestellBin) return c;
+    }
+  } catch (e) {}
+  return null;
+}
+function saveConfig(c) {
+  localStorage.setItem("bestellapp_config", JSON.stringify({ apiKey: c.apiKey, lagerBin: c.lagerBin, bestellBin: c.bestellBin }));
+}
+function makeSetupUrl(c) {
+  return `${window.location.origin}${window.location.pathname}#setup=${encodeURIComponent(btoa(`${c.apiKey}|${c.lagerBin}|${c.bestellBin}`))}`;
+}
+async function binRead(apiKey, binId) {
+  const res = await fetch(`https://api.jsonbin.io/v3/b/${binId}/latest`, { headers: { "X-Master-Key": apiKey } });
+  if (!res.ok) throw new Error(`Laden fehlgeschlagen (${res.status})`);
+  return (await res.json()).record;
+}
+async function binWrite(apiKey, binId, data) {
+  const res = await fetch(`https://api.jsonbin.io/v3/b/${binId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", "X-Master-Key": apiKey },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    let msg = `Fehler ${res.status}`;
+    try { msg += ": " + ((await res.json()).message || ""); } catch (e) {}
+    throw new Error(msg);
+  }
+}
+async function binCreate(apiKey, data) {
+  const res = await fetch("https://api.jsonbin.io/v3/b", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Master-Key": apiKey, "X-Bin-Name": "bestellungen", "X-Bin-Private": "true" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Erstellen fehlgeschlagen");
+  return (await res.json()).metadata.id;
+}
+
+// Form der Bestell-Daten im Speicher (ohne _stand, Backtage wie beim Speichern sortiert und gekürzt)
+function bestellNormalisieren(d) {
+  const { _stand, ...rest } = d || {};
+  return { ...rest, backtage: [...(rest.backtage || [])].sort((a, b) => b.datum.localeCompare(a.datum)).slice(0, MAX_BACKTAGE) };
+}
+
+// Alle Speicher des Kontos auflisten (je Seite 10, höchstens 5 Seiten)
+async function binListe(apiKey) {
+  const alle = [];
+  let letzte = "";
+  for (let i = 0; i < 5; i++) {
+    const res = await fetch(`https://api.jsonbin.io/v3/c/uncategorized/bins${letzte ? "/" + letzte : ""}`, { headers: { "X-Master-Key": apiKey } });
+    if (!res.ok) break;
+    const liste = await res.json();
+    if (!Array.isArray(liste) || !liste.length) break;
+    alle.push(...liste);
+    if (liste.length < 10) break;
+    letzte = liste[liste.length - 1].record;
+  }
+  return alle;
+}
+
+// Weitere Bestell-Speicher im selben Konto finden (z.B. weil jedes Gerät "Erstes Gerät" gewählt hat)
+async function andereBestellSpeicher(c) {
+  const liste = await binListe(c.apiKey);
+  const gefunden = [];
+  for (const b of liste) {
+    const id = b.record;
+    if (!id || id === c.bestellBin || id === c.lagerBin) continue;
+    try {
+      const rec = await binRead(c.apiKey, id);
+      if (!rec || rec.ersetztDurch || !Array.isArray(rec.sorten) || !Array.isArray(rec.backtage)) continue;
+      gefunden.push({
+        id,
+        rec,
+        kunden: (rec.kunden || []).length,
+        bestellungen: rec.backtage.reduce((s, bt) => s + (bt.bestellungen || []).length, 0),
+        stand: rec._stand || null,
+      });
+    } catch (e) {}
+  }
+  return gefunden;
+}
+
+// Zwei Bestell-Speicher zusammenführen: Kunden per Name, Sorten per Kürzel, Backtage per Datum
+function bestellSpeicherZusammenfuehren(haupt, neben) {
+  const daten = JSON.parse(JSON.stringify(haupt));
+  let neueKunden = 0, neueBestellungen = 0;
+  const kundeMap = new Map();
+  (neben.kunden || []).forEach((k) => {
+    const da = daten.kunden.find((x) => normalizeName(x.name) === normalizeName(k.name));
+    if (da) kundeMap.set(k.id, da.id);
+    else {
+      const neu = { ...k, id: daten.kunden.some((x) => x.id === k.id) ? uid() : k.id };
+      daten.kunden.push(neu);
+      kundeMap.set(k.id, neu.id);
+      neueKunden++;
+    }
+  });
+  const sorteMap = new Map();
+  (neben.sorten || []).forEach((s) => {
+    const da = daten.sorten.find((x) => normalizeName(x.kurz) === normalizeName(s.kurz) || normalizeName(x.name) === normalizeName(s.name));
+    if (da) sorteMap.set(s.id, da.id);
+    else {
+      const neu = { ...s, id: daten.sorten.some((x) => x.id === s.id) ? uid() : s.id };
+      daten.sorten.push(neu);
+      sorteMap.set(s.id, neu.id);
+    }
+  });
+  (neben.backtage || []).forEach((bt) => {
+    let ziel = daten.backtage.find((x) => x.datum === bt.datum);
+    if (!ziel) {
+      ziel = { ...bt, id: daten.backtage.some((x) => x.id === bt.id) ? uid() : bt.id, bestellungen: [] };
+      daten.backtage.push(ziel);
+    }
+    (bt.bestellungen || []).forEach((b) => {
+      const items = {};
+      Object.entries(b.items || {}).forEach(([sid, q]) => (items[sorteMap.get(sid) || sid] = q));
+      const kundeId = kundeMap.get(b.kundeId) || b.kundeId;
+      const doppelt = ziel.bestellungen.some((x) => x.id === b.id || (x.kundeId === kundeId && gleichJson(x.items, items)));
+      if (doppelt) return;
+      ziel.bestellungen.push({ ...b, kundeId, items });
+      neueBestellungen++;
+    });
+  });
+  daten.sortenUpdates = [...new Set([...(daten.sortenUpdates || []), ...(neben.sortenUpdates || [])])];
+  return { daten: bestellNormalisieren(daten), neueKunden, neueBestellungen };
+}
+
+// ---------- Rechnen: Backzettel ----------
+function rezeptGesamt(r) {
+  return r.items.reduce((s, it) => s + (Number(it.menge) || 0), 0);
+}
+function findRezept(recipes, name) {
+  if (!name) return null;
+  const n = name.trim().toLowerCase();
+  return recipes.find((r) => r.name.trim().toLowerCase() === n) || null;
+}
+// Teiggewicht pro Stück: eigener Wert oder aus dem Rezept (Ansatz-Gewicht / Stück pro Ansatz)
+function gProStueck(sorte, rezept) {
+  const eigen = Number(String(sorte.gProStueck ?? "").replace(",", "."));
+  if (eigen > 0) return eigen;
+  if (!rezept) return 0;
+  return rezeptGesamt(rezept) / (rezept.stueckProAnsatz || 1);
+}
+
+const zahl = (v) => Number(String(v ?? "").replace(",", ".")) || 0;
+// Rohstoff per Name finden – auch bei leicht anderer Schreibweise ("Walnüsse" ↔ "Wallnüsse")
+function findRohstoff(materials, name) {
+  if (!name) return null;
+  const n = name.trim().toLowerCase();
+  const exakt = materials.find((m) => m.name.trim().toLowerCase() === n);
+  if (exakt) return exakt;
+  let best = null, score = 0;
+  materials.forEach((m) => {
+    if (m.vorteig) return;
+    const s = nameSimilarity(name, m.name);
+    if (s > score) { score = s; best = m; }
+  });
+  return score >= 0.85 ? best : null;
+}
+
+const VORSTUFE_RE =/sauerteig|kochst|quellst|vorteig|br(ü|ue)hst/i;
+
+function berechneBackzettel(backtag, sorten, lager) {
+  const recipes = lager?.recipes || [];
+  const materials = lager?.materials || [];
+  const mat = (id) => materials.find((m) => m.id === id);
+
+  // 1) Stück pro Sorte
+  const stueck = new Map();
+  (backtag?.bestellungen || []).forEach((b) =>
+    Object.entries(b.items || {}).forEach(([sid, q]) => stueck.set(sid, (stueck.get(sid) || 0) + (Number(q) || 0)))
+  );
+  const proSorte = sorten
+    .filter((s) => (stueck.get(s.id) || 0) > 0)
+    .map((s) => ({ sorte: s, stueck: stueck.get(s.id) }));
+
+  // 2) Teig pro Rezept (Hauptteig + Extras wie Füllungen) und Zugaben (z.B. Walnüsse ins Nussbrot)
+  const teige = new Map(); // rezeptName -> {rezept, teigG, sorten:[]}
+  const zugaben = new Map(); // materialId -> {mat, menge, fuer:[]}
+  const fehlend = [];
+  const fehlendeExtras = new Set();
+  proSorte.forEach(({ sorte, stueck: q }) => {
+    const teile = [{ rezept: sorte.rezept, g: sorte.gProStueck, haupt: true }, ...(sorte.extras || [])];
+    teile.forEach((t) => {
+      if (!t.haupt && t.rohstoff) {
+        const m = findRohstoff(materials, t.rohstoff);
+        const g = zahl(t.g);
+        if (!g) return;
+        const key = m ? m.id : `fehlt:${t.rohstoff}`;
+        if (!zugaben.has(key)) zugaben.set(key, { materialId: m?.id, name: m ? m.name : t.rohstoff, mat: m, menge: 0, fuer: [] });
+        const z = zugaben.get(key);
+        z.menge += q * g;
+        z.fuer.push({ kurz: sorte.kurz, stueck: q, g });
+        return;
+      }
+      const rezept = findRezept(recipes, t.rezept);
+      if (!rezept) {
+        if (t.haupt) fehlend.push(sorte);
+        else if (t.rezept) fehlendeExtras.add(`Füllung/Topping „${t.rezept}“ (${sorte.kurz})`);
+        return;
+      }
+      // Extra ohne Gewicht = 1 Rezept-Portion pro Stück (Ansatz-Gewicht / Stück pro Ansatz)
+      const g = t.haupt ? gProStueck(sorte, rezept) : zahl(t.g) || gProStueck({ gProStueck: "" }, rezept);
+      if (!g) return;
+      const key = rezept.name;
+      if (!teige.has(key)) teige.set(key, { rezept, teigG: 0, sorten: [] });
+      const e = teige.get(key);
+      e.teigG += q * g;
+      e.sorten.push({ kurz: sorte.kurz, stueck: q, g });
+    });
+  });
+
+  // 3) Zutaten je Teig skaliert + Vorstufen sammeln
+  const vorstufen = new Map(); // name -> {name, menge, teile: Map(materialId -> menge), fuer: Set}
+  const addVorstufe = (name, menge, teile, fuer) => {
+    if (!vorstufen.has(name)) vorstufen.set(name, { name, menge: 0, teile: new Map(), fuer: new Set() });
+    const v = vorstufen.get(name);
+    v.menge += menge;
+    teile.forEach(({ materialId, menge: m }) => v.teile.set(materialId, (v.teile.get(materialId) || 0) + m));
+    v.fuer.add(fuer);
+  };
+  const alleItems = [];
+  const teigListe = [...teige.values()].map((t) => {
+    const gesamt = rezeptGesamt(t.rezept);
+    const faktor = gesamt > 0 ? t.teigG / gesamt : 0;
+    const items = t.rezept.items.map((it) => ({ ...it, menge: it.menge * faktor }));
+    alleItems.push(...items);
+    // Vorstufen-Rohstoffe (z.B. "Sauerteig R.", "Kochstück D.")
+    items.forEach((it) => {
+      const m = mat(it.materialId);
+      if (m && VORSTUFE_RE.test(m.name)) {
+        const teile = m.vorteig?.teile?.length
+          ? m.vorteig.teile.map((tt) => ({ materialId: tt.materialId, menge: it.menge * tt.anteil }))
+          : [];
+        addVorstufe(m.name, it.menge, teile, t.rezept.name);
+      }
+    });
+    // Vorstufen als Abschnitt im Rezept (z.B. "Kochstück" im Vollkornbrot, "Quellstück" im Körnerkick)
+    const abschnitte = new Map();
+    items.forEach((it) => {
+      if (it.gruppe && VORSTUFE_RE.test(it.gruppe)) {
+        if (!abschnitte.has(it.gruppe)) abschnitte.set(it.gruppe, []);
+        abschnitte.get(it.gruppe).push(it);
+      }
+    });
+    abschnitte.forEach((its, gruppe) =>
+      addVorstufe(`${gruppe} (${t.rezept.name})`, its.reduce((s, i) => s + i.menge, 0), its.map((i) => ({ materialId: i.materialId, menge: i.menge })), t.rezept.name)
+    );
+    return { ...t, faktor, items };
+  });
+
+  const zugabenListe = [...zugaben.values()].sort((a, b) => a.name.localeCompare(b.name, "de"));
+  zugabenListe.forEach((z) => z.materialId && alleItems.push({ materialId: z.materialId, menge: z.menge }));
+
+  // 4) Rohstoffbedarf fürs Lager (alles in echte Rohstoffe aufgelöst)
+  const rohstoffe = expandVorteige(
+    alleItems.map((i) => ({ materialId: i.materialId, menge: i.menge })),
+    materials
+  )
+    .map((r) => ({ ...r, mat: mat(r.materialId) }))
+    .filter((r) => r.mat && r.menge > 0)
+    .sort((a, b) => b.menge - a.menge);
+
+  const vorstufenListe = [...vorstufen.values()]
+    .map((v) => ({ ...v, teile: [...v.teile.entries()].map(([materialId, menge]) => ({ materialId, menge, mat: mat(materialId) })), fuer: [...v.fuer] }))
+    .sort((a, b) => a.name.localeCompare(b.name, "de"));
+
+  // Verweise auf gelöschte Rohstoffe: diese Anteile kann die Lager-App nicht abbuchen
+  const verwaist = [
+    ...vorstufenListe.filter((v) => v.teile.some((t) => !t.mat)).map((v) => v.name),
+    ...teigListe.filter((t) => t.items.some((i) => !mat(i.materialId))).map((t) => t.rezept.name),
+    ...zugabenListe.filter((z) => !z.mat).map((z) => `Zugabe „${z.name}“`),
+    ...fehlendeExtras,
+  ];
+
+  return {
+    proSorte,
+    teige: teigListe.sort((a, b) => b.teigG - a.teigG),
+    zugaben: zugabenListe,
+    vorstufen: vorstufenListe,
+    rohstoffe,
+    fehlend,
+    verwaist,
+    stueckGesamt: proSorte.reduce((s, p) => s + p.stueck, 0),
+    teigGesamt: teigListe.reduce((s, t) => s + t.teigG, 0),
+  };
+}
+
+// ---------- Preise, Rabatt, Deckungsbeitrag ----------
+const RABATTE = [0, 10, 15, 20, 30, 40];
+const runden2 = (n) => Math.round(n * 100) / 100;
+// Summe ohne Rabatt
+// Verkaufspreis einer Sorte – mit Sonderpreis für einzelne Kunden (z.B. Hofladen), sonst der normale Preis
+function preisFuer(s, kundeId) {
+  const sonder = kundeId ? zahl(s?.sonderpreise?.[kundeId]) : 0;
+  return sonder > 0 ? sonder : Number(s?.preis) || 0;
+}
+function bestellBrutto(b, sorten) {
+  return Object.entries(b.items || {}).reduce((s, [sid, q]) => {
+    const so = sorten.find((x) => x.id === sid);
+    return s + (Number(q) || 0) * preisFuer(so, b.kundeId);
+  }, 0);
+}
+function bestellRabatt(b, sorten) {
+  return runden2((bestellBrutto(b, sorten) * (Number(b.rabatt) || 0)) / 100);
+}
+// Zu zahlen (nach Rabatt)
+function bestellSumme(b, sorten) {
+  return runden2(bestellBrutto(b, sorten) - bestellRabatt(b, sorten));
+}
+
+// Rohstoffkosten pro Gramm eines Rezepts (Sauerteig & Kochstück in Mehl/Wasser aufgelöst, Preise aus der Lager-App)
+function rezeptKostenProG(rezept, materials) {
+  const ges = rezeptGesamt(rezept);
+  if (!ges) return 0;
+  const roh = expandVorteige(rezept.items.map((i) => ({ materialId: i.materialId, menge: i.menge })), materials);
+  return roh.reduce((s, r) => s + r.menge * (Number(materials.find((m) => m.id === r.materialId)?.price) || 0), 0) / ges;
+}
+// Rohstoffkosten für 1 Stück einer Sorte (Teig + Füllungen/Toppings + Zugaben)
+function stueckKosten(sorte, lager) {
+  const recipes = lager?.recipes || [];
+  const materials = lager?.materials || [];
+  const ohnePreis = new Set();
+  let unbekannt = false;
+  const preisFehlt = (m) => m && !(Number(m.price) > 0) && !/wasser/i.test(m.name);
+  const pruefen = (rezept) =>
+    expandVorteige(rezept.items.map((i) => ({ materialId: i.materialId, menge: i.menge })), materials).forEach((r) => {
+      const m = materials.find((x) => x.id === r.materialId);
+      if (preisFehlt(m)) ohnePreis.add(m.name);
+    });
+  let kosten = 0;
+  const haupt = findRezept(recipes, sorte.rezept);
+  if (!haupt) unbekannt = true;
+  else {
+    kosten += gProStueck(sorte, haupt) * rezeptKostenProG(haupt, materials);
+    pruefen(haupt);
+  }
+  (sorte.extras || []).forEach((x) => {
+    if (x.rohstoff) {
+      const m = findRohstoff(materials, x.rohstoff);
+      if (!m) unbekannt = true;
+      else {
+        kosten += zahl(x.g) * (Number(m.price) || 0);
+        if (preisFehlt(m)) ohnePreis.add(m.name);
+      }
+    } else if (x.rezept) {
+      const r = findRezept(recipes, x.rezept);
+      if (!r) unbekannt = true;
+      else {
+        kosten += (zahl(x.g) || gProStueck({ gProStueck: "" }, r)) * rezeptKostenProG(r, materials);
+        pruefen(r);
+      }
+    }
+  });
+  return { kosten, ohnePreis, unbekannt };
+}
+// Herstellungskosten (Strom, Arbeitszeit, Verpackung) als Prozent der Materialkosten – laut Börni ca. gleich viel wie das Material
+const HERSTELL_PROZENT_STANDARD = 90;
+const herstellProzentVon = (daten) => {
+  const p = Number(daten?.herstellProzent);
+  return isFinite(p) && daten?.herstellProzent !== undefined && daten?.herstellProzent !== "" ? p : HERSTELL_PROZENT_STANDARD;
+};
+
+// Alles zu einer Bestellung: Summe, Rabatt (= Verlust durch Rabatt), zu zahlen, Materialkosten, Deckungsbeitrag,
+// Herstellungskosten und Gewinn
+function bestellWirtschaft(b, sorten, lager, herstellProzent = HERSTELL_PROZENT_STANDARD) {
+  const brutto = bestellBrutto(b, sorten);
+  const rabatt = bestellRabatt(b, sorten);
+  const netto = runden2(brutto - rabatt);
+  const ohnePreis = new Set();
+  let unbekannt = false;
+  let kosten = 0;
+  let verpackung = 0;
+  Object.entries(b.items || {}).forEach(([sid, q]) => {
+    const so = sorten.find((x) => x.id === sid);
+    if (!so) return;
+    const k = stueckKosten(so, lager);
+    kosten += (Number(q) || 0) * k.kosten;
+    verpackung += (Number(q) || 0) * zahl(so.verpackung);
+    k.ohnePreis.forEach((n) => ohnePreis.add(n));
+    if (k.unbekannt) unbekannt = true;
+  });
+  kosten = runden2(kosten);
+  verpackung = runden2(verpackung);
+  const herstell = runden2((kosten * (Number(herstellProzent) || 0)) / 100);
+  return {
+    brutto,
+    rabattProzent: Number(b.rabatt) || 0,
+    rabatt,
+    netto,
+    kosten, // Materialkosten
+    db: runden2(netto - kosten), // Deckungsbeitrag nach Material
+    herstellProzent: Number(herstellProzent) || 0,
+    herstell, // Herstellungskosten
+    verpackung, // eigene Verpackung je Sorte (z.B. Sackerl + Schleife bei den Cookies)
+    gewinn: runden2(netto - kosten - herstell - verpackung),
+    gewinnOhneRabatt: runden2(brutto - kosten - herstell - verpackung),
+    ohnePreis,
+    unbekannt,
+  };
+}
+const fmtProzent = (n) => (isFinite(n) ? `${Math.round(n)} %` : "–");
+function bestellText(b, sorten) {
+  return sorten
+    .filter((s) => (b.items?.[s.id] || 0) > 0)
+    .map((s) => `${fmtQty(b.items[s.id])}× ${s.kurz}`)
+    .join(", ");
+}
+
+// ---------- WhatsApp-Text erkennen ----------
+const ZAHLWOERTER = { ein: 1, eins: 1, eine: 1, einen: 1, einem: 1, zwei: 2, drei: 3, vier: 4, "fünf": 5, fuenf: 5, sechs: 6, sieben: 7, acht: 8, neun: 9, zehn: 10, elf: 11, "zwölf": 12, zwoelf: 12, halbes: 0.5, halbe: 0.5, halben: 0.5, halb: 0.5 };
+function parseWhatsApp(text, sorten, kunden) {
+  const ergebnis = {};
+  const unbekannt = [];
+  const kandidaten = [];
+  sorten.forEach((s) => {
+    [s.kurz, s.name, ...(s.aliases || "").split(",")].map((x) => x.trim()).filter(Boolean).forEach((n) => kandidaten.push({ s, n }));
+  });
+  const segmente = text
+    .replace(/½/g, " 0.5 ")
+    .replace(/1\/2/g, " 0.5 ")
+    .split(/\n|,|;|\+|\bund\b|\bu\.\s|&/i)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  segmente.forEach((seg) => {
+    const woerter = seg.replace(/[!?.:()]/g, " ").split(/\s+/).filter(Boolean);
+    let menge = null;
+    const rest = [];
+    woerter.forEach((w) => {
+      const wl = w.toLowerCase();
+      const num = wl.match(/^(\d+(?:[.,]\d+)?)(x|stk|stück|st)?$/);
+      if (/^halb(e|es|en)?$/.test(wl)) menge = menge && menge > 1 ? menge * 0.5 : 0.5; // "ein halbes" = ½, "zwei halbe" = 1
+      else if (num && menge === null) menge = parseFloat(num[1].replace(",", "."));
+      else if (/^x$|^stk\.?$|^stück$|^mal$/.test(wl)) {}
+      else if (ZAHLWOERTER[wl] !== undefined && menge === null) menge = ZAHLWOERTER[wl];
+      else rest.push(w);
+    });
+    if (!rest.length) return;
+    // Bestes Wort / Wortpaar finden
+    let best = null;
+    for (let i = 0; i < rest.length; i++) {
+      for (let len = 1; len <= 3 && i + len <= rest.length; len++) {
+        const phrase = rest.slice(i, i + len).join(" ");
+        if (normalizeName(phrase).length < 2) continue;
+        kandidaten.forEach(({ s, n }) => {
+          const score = nameSimilarity(phrase, n);
+          if (!best || score > best.score) best = { s, score };
+        });
+      }
+    }
+    if (best && best.score >= 0.72) {
+      ergebnis[best.s.id] = (ergebnis[best.s.id] || 0) + (menge ?? 1);
+    } else if (menge !== null) {
+      unbekannt.push(seg);
+    }
+  });
+  // Kundenname im Text?
+  let kunde = null;
+  const tn = normalizeName(text);
+  kunden.forEach((k) => {
+    const kn = normalizeName(k.name);
+    if (kn.length >= 3 && tn.includes(kn) && (!kunde || kn.length > normalizeName(kunde.name).length)) kunde = k;
+  });
+  return { items: ergebnis, unbekannt, kunde };
+}
+
+// QR-Code wird direkt auf dem Gerät erzeugt – der Einrichtungs-Link (mit Schlüssel) verlässt das Gerät nicht
+function QrCode({ text, size = 220 }) {
+  const src = useMemo(() => {
+    try {
+      const qr = qrcode(0, "M");
+      qr.addData(text);
+      qr.make();
+      const zelle = Math.max(2, Math.floor(size / (qr.getModuleCount() + 8)));
+      return qr.createDataURL(zelle, zelle * 4);
+    } catch (e) {
+      return null;
+    }
+  }, [text, size]);
+  if (!src) return <p className="text-xs" style={{ color: COL.warn }}>QR-Code konnte nicht erzeugt werden – bitte den Link unten verwenden.</p>;
+  return <img src={src} width={size} height={size} alt="QR-Code zum Einrichten" style={{ imageRendering: "pixelated", borderRadius: 8, border: `1px solid ${COL.line}` }} />;
+}
+
+// ---------- Setup ----------
+function SetupScreen({ onReady }) {
+  const [link, setLink] = useState("");
+  const [modus, setModus] = useState("neu");
+  const [bestellBin, setBestellBin] = useState("");
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState("");
+
+  const los = async () => {
+    setError("");
+    const c = parseSetup(link);
+    if (!c) {
+      setError("Das ist kein gültiger Link. Kopiere ihn in der Lager-App unter Einstellungen → „Neues Gerät einrichten“.");
+      return;
+    }
+    if (c.bestellBin) {
+      saveConfig(c);
+      onReady();
+      return;
+    }
+    setWorking(true);
+    try {
+      await binRead(c.apiKey, c.lagerBin); // prüft, ob der Link stimmt
+      let bin = bestellBin.trim();
+      if (modus === "neu") {
+        // Gibt es schon einen Bestell-Speicher (z.B. vom anderen Gerät)? Dann denselben verwenden statt einen zweiten anzulegen.
+        const vorhandene = await andereBestellSpeicher({ ...c, bestellBin: "" });
+        if (vorhandene.length) {
+          vorhandene.sort((a, b) => b.bestellungen + b.kunden - (a.bestellungen + a.kunden));
+          bin = vorhandene[0].id;
+        } else {
+          bin = await binCreate(c.apiKey, leereDaten());
+        }
+      } else await binRead(c.apiKey, bin);
+      saveConfig({ ...c, bestellBin: bin });
+      onReady();
+    } catch (e) {
+      setError("Verbinden fehlgeschlagen: " + (e.message || "unbekannter Fehler"));
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen w-full flex items-center justify-center px-4 py-10" style={{ backgroundColor: COL.bg, fontFamily: "'IBM Plex Sans', sans-serif", color: COL.ink }}>
+      <div className="w-full max-w-md">
+        <div className="flex justify-center mb-6"><Brand /></div>
+        <Card>
+          <h1 className="text-xl mb-1" style={{ fontFamily: "'Fraunces', serif", fontWeight: 700 }}>Bestell-App einrichten 🧾</h1>
+          <p className="text-sm mb-4" style={{ color: COL.inkMuted }}>
+            Die Bestell-App holt sich Rezepte und Rohstoffe aus deiner Lager-App. Öffne dort <b>Einstellungen → Neues Gerät einrichten</b>, kopiere den Link und füge ihn hier ein.
+          </p>
+          <div className="flex flex-col gap-3">
+            <Field label="Link aus der Lager-App (oder Einrichtungs-Link der Bestell-App)">
+              <textarea style={{ ...inputStyle, minHeight: 80, fontSize: 12, fontFamily: "'IBM Plex Mono', monospace" }} value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…#setup=…" />
+            </Field>
+            {!parseSetup(link)?.bestellBin && (
+              <div className="flex gap-1 p-1 rounded-xl" style={{ backgroundColor: COL.bg }}>
+                {[["neu", "Erstes Gerät"], ["vorhanden", "Speicher schon vorhanden"]].map(([k, l]) => (
+                  <button key={k} onClick={() => setModus(k)} className="flex-1 text-sm py-2 rounded-lg" style={{ backgroundColor: modus === k ? COL.accent : "transparent", color: modus === k ? "#fff" : COL.ink }}>{l}</button>
+                ))}
+              </div>
+            )}
+            {modus === "vorhanden" && !parseSetup(link)?.bestellBin && (
+              <Field label="Bestell-Speicher-ID (vom ersten Gerät)">
+                <input style={inputStyle} value={bestellBin} onChange={(e) => setBestellBin(e.target.value)} />
+              </Field>
+            )}
+            {error && <div className="text-sm px-3 py-2 rounded-lg" style={{ backgroundColor: COL.warnSoft, color: COL.warn }}>{error}</div>}
+            <Btn primary onClick={los} disabled={working || !link.trim()}>{working ? "Einen Moment …" : "Los geht's"}</Btn>
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Bestellung erfassen ----------
+function Stepper({ value, onChange, halbe }) {
+  const step = 1;
+  return (
+    <div className="flex items-center gap-1">
+      {halbe && (
+        <button onClick={() => onChange(value + 0.5)} className="h-9 px-2 rounded-full text-xs font-semibold" style={{ border: `1px dashed ${COL.accent}`, color: COL.accent }} aria-label="ein halbes dazu">
+          +½
+        </button>
+      )}
+      <button onClick={() => onChange(Math.max(0, Math.round((value - step) * 2) / 2))} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ border: `1px solid ${COL.line}`, backgroundColor: COL.surface, color: COL.ink }} aria-label="weniger">
+        <IcMinus size={16} />
+      </button>
+      <input
+        type="number"
+        inputMode="decimal"
+        min="0"
+        step="0.5"
+        value={value || ""}
+        placeholder="0"
+        onChange={(e) => onChange(Math.max(0, Number(e.target.value.replace(",", ".")) || 0))}
+        className="text-center font-semibold"
+        style={{ ...inputStyle, width: 52, padding: "6px 2px", fontSize: 16 }}
+      />
+      <button onClick={() => onChange(Math.round((value + step) * 2) / 2)} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ backgroundColor: value > 0 ? COL.accent : COL.accentSoft, color: value > 0 ? "#fff" : COL.accent }} aria-label="mehr">
+        <IcPlus size={16} />
+      </button>
+    </div>
+  );
+}
+
+// Rabatt-Auswahl (Kein, 10 %, 15 % …)
+function RabattWahl({ wert, onChange, klein }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {RABATTE.map((r) => {
+        const on = (Number(wert) || 0) === r;
+        return (
+          <button
+            key={r}
+            onClick={() => onChange(r)}
+            className={`${klein ? "text-xs px-2 py-1" : "text-sm px-3 py-1.5"} font-semibold rounded-full`}
+            style={{ backgroundColor: on ? (r ? COL.warn : COL.ink) : COL.surface, color: on ? "#fff" : COL.ink, border: `1px solid ${on ? (r ? COL.warn : COL.ink) : COL.line}` }}
+          >
+            {r ? `−${r} %` : "Kein Rabatt"}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// Kalkulation mit Rabatt (nur für Börni, kommt weder auf den Backzettel noch auf die Kundenzettel):
+// zu zahlen − Materialkosten = Deckungsbeitrag − Herstellungskosten = Gewinn
+function Wirtschaftlichkeit({ w, rabattLabel, nettoLabel = "Zu zahlen", mitRabatt }) {
+  const zeile = (label, wert, stil = {}) => (
+    <div className="flex justify-between gap-2" style={stil}>
+      <span>{label}</span>
+      <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, whiteSpace: "nowrap" }}>{wert}</span>
+    </div>
+  );
+  const anteil = (n) => (w.netto > 0 ? ` (${fmtProzent((n / w.netto) * 100)})` : "");
+  const strich = { borderTop: `1px solid ${COL.line}`, paddingTop: 4, marginTop: 2 };
+  const mitHerstellung = w.herstellProzent > 0;
+  const mitVerpackung = w.verpackung > 0;
+  const mitGewinn = mitHerstellung || mitVerpackung;
+  const ergebnis = mitGewinn ? w.gewinn : w.db;
+  const ergebnisOhneRabatt = mitGewinn ? w.gewinnOhneRabatt : runden2(w.brutto - w.kosten);
+  const rabattDa = mitRabatt ?? w.rabattProzent > 0;
+  const farbe = (n) => (n > 0 ? COL.ok : COL.warn);
+  return (
+    <div className="rounded-xl p-3 text-sm flex flex-col gap-1" style={{ backgroundColor: COL.bg }}>
+      {zeile("Summe ohne Rabatt", fmtEUR(w.brutto))}
+      {rabattDa && zeile(rabattLabel || `Rabatt ${w.rabattProzent} % = dein Verlust`, `−${fmtEUR(w.rabatt)}`, { color: COL.warn })}
+      {zeile(nettoLabel, fmtEUR(w.netto), { fontWeight: 700 })}
+      {zeile("Materialkosten", `−${fmtEUR(w.kosten)}`, { color: COL.inkMuted })}
+      {zeile(`Deckungsbeitrag${anteil(w.db)}`, fmtEUR(w.db), { ...strich, fontWeight: 700, color: farbe(w.db) })}
+      {mitHerstellung && zeile(`Herstellungskosten (${w.herstellProzent} % vom Material)`, `−${fmtEUR(w.herstell)}`, { color: COL.inkMuted })}
+      {mitVerpackung && zeile("Verpackung", `−${fmtEUR(w.verpackung)}`, { color: COL.inkMuted })}
+      {mitGewinn && zeile(`Gewinn${anteil(w.gewinn)}`, fmtEUR(w.gewinn), { ...strich, fontWeight: 700, fontSize: 15, color: farbe(w.gewinn) })}
+      <div className="text-xs mt-1" style={{ color: farbe(ergebnis) }}>
+        {ergebnis > 0
+          ? rabattDa
+            ? `✅ Trotz Rabatt bleiben dir ${fmtEUR(ergebnis)} ${mitGewinn ? "Gewinn" : ""} – ohne Rabatt wären es ${fmtEUR(ergebnisOhneRabatt)}.`
+            : `✅ Dir bleiben ${fmtEUR(ergebnis)} ${mitGewinn ? `Gewinn nach Material${mitHerstellung ? ", Herstellung" : ""}${mitVerpackung ? " und Verpackung" : ""}` : "nach den Materialkosten"}.`
+          : w.db > 0
+          ? `⚠️ Das Material ist gedeckt, aber nicht die Herstellungskosten – Verlust ${fmtEUR(-ergebnis)}.`
+          : `⚠️ Nicht einmal das Material ist gedeckt – Verlust ${fmtEUR(-ergebnis)}.`}
+      </div>
+      {(w.ohnePreis.size > 0 || w.unbekannt) && (
+        <div className="text-xs mt-1" style={{ color: COL.amber }}>
+          {w.ohnePreis.size > 0 && <>Ohne Preis in der Lager-App (Kosten sind dadurch zu niedrig): {[...w.ohnePreis].join(", ")}. </>}
+          {w.unbekannt && <>Nicht alle Rezepte gefunden – Lager-App einmal öffnen.</>}
+        </div>
+      )}
+      <div className="text-xs" style={{ color: COL.inkMuted }}>
+        Materialkosten aus den Rohstoffpreisen der Lager-App
+        {mitHerstellung ? `, Herstellungskosten (Strom, Arbeitszeit, Verpackung) = ${w.herstellProzent} % davon – änderbar unter Einstellungen → App.` : "."}
+      </div>
+    </div>
+  );
+}
+
+function BestellEditor({ start, sorten, kunden, lager, herstellProzent, letzteBestellung, onSave, onCancel, onNeuerKunde }) {
+  const [kundeName, setKundeName] = useState(start?.kundeName || "");
+  const [items, setItems] = useState(start?.items || {});
+  const [rabatt, setRabatt] = useState(Number(start?.rabatt) || 0);
+  const [notiz, setNotiz] = useState(start?.notiz || "");
+  const [quelle, setQuelle] = useState(start?.quelle || "whatsapp");
+  const [waText, setWaText] = useState(start?.nachricht || "");
+  const [waOffen, setWaOffen] = useState(!start?.id);
+  const [waInfo, setWaInfo] = useState(null);
+  const [alleSorten, setAlleSorten] = useState(false);
+
+  const kunde = kunden.find((k) => k.name.trim().toLowerCase() === kundeName.trim().toLowerCase());
+  const letzte = kunde ? letzteBestellung(kunde.id) : null;
+  const sichtbar = sorten.filter((s) => alleSorten || s.aktiv || (items[s.id] || 0) > 0);
+  const wirtschaft = useMemo(() => bestellWirtschaft({ items, rabatt, kundeId: kunde?.id }, sorten, lager, herstellProzent), [items, rabatt, kunde?.id, sorten, lager, herstellProzent]);
+  const summe = wirtschaft.netto;
+
+  const erkennen = () => {
+    const r = parseWhatsApp(waText, sorten, kunden);
+    setItems((prev) => {
+      const n = { ...prev };
+      Object.entries(r.items).forEach(([sid, q]) => (n[sid] = q));
+      return n;
+    });
+    if (r.kunde && !kundeName) setKundeName(r.kunde.name);
+    setWaInfo(r);
+  };
+
+  const speichern = () => {
+    if (!kundeName.trim()) return alert("Bitte einen Kunden eintragen.");
+    const clean = Object.fromEntries(Object.entries(items).filter(([, q]) => q > 0));
+    if (!Object.keys(clean).length) return alert("Die Bestellung ist noch leer.");
+    const k = kunde || onNeuerKunde(kundeName.trim());
+    // Die WhatsApp-Nachricht wird nur zum Nachlesen gespeichert (nicht gedruckt); "notiz" kommt auf die Zettel
+    const nachricht = quelle === "whatsapp" && waText.trim() ? waText.trim().slice(0, 500) : "";
+    onSave({ ...(start || {}), id: start?.id || uid(), kundeId: k.id, items: clean, rabatt, notiz: notiz.trim(), nachricht, quelle, bezahlt: start?.bezahlt || false });
+  };
+
+  return (
+    <Card className="mb-4" style={{ border: `2px solid ${COL.accent}`, animation: "fadeIn .2s ease" }}>
+      <H2 right={<button onClick={onCancel} style={{ color: COL.inkMuted }} aria-label="Schließen"><IcX /></button>}>
+        {start?.id ? "✏️ Bestellung ändern" : "🧾 Neue Bestellung"}
+      </H2>
+
+      <div className="flex flex-col gap-3">
+        <Field label="Kunde">
+          <input style={inputStyle} list="kunden-liste" value={kundeName} onChange={(e) => setKundeName(e.target.value)} placeholder="Name eintippen …" autoFocus={!start?.id} />
+          <datalist id="kunden-liste">{kunden.map((k) => <option key={k.id} value={k.name} />)}</datalist>
+        </Field>
+        {kundeName.trim() && !kunde && <div className="text-xs -mt-2" style={{ color: COL.amber }}>✨ Neuer Kunde – wird beim Speichern angelegt.</div>}
+        {letzte && !start?.id && (
+          <button onClick={() => setItems({ ...letzte.items })} className="text-left text-sm px-3 py-2 rounded-xl" style={{ backgroundColor: COL.amberSoft, color: COL.amber }}>
+            🔁 Wie letztes Mal: <b>{bestellText(letzte, sorten)}</b>
+          </button>
+        )}
+
+        <div className="flex gap-1 p-1 rounded-xl" style={{ backgroundColor: COL.bg }}>
+          {[["whatsapp", "💬 WhatsApp"], ["selbst", "✍️ Selbst / Telefon"]].map(([k, l]) => (
+            <button key={k} onClick={() => setQuelle(k)} className="flex-1 text-sm py-2 rounded-lg" style={{ backgroundColor: quelle === k ? COL.surface : "transparent", boxShadow: quelle === k ? "0 1px 3px rgba(0,0,0,0.08)" : "none", fontWeight: quelle === k ? 600 : 400 }}>{l}</button>
+          ))}
+        </div>
+
+        {quelle === "whatsapp" && (
+          <div className="rounded-xl p-3" style={{ backgroundColor: "#E7F6EA", border: "1px solid #C9E8CF" }}>
+            <button onClick={() => setWaOffen(!waOffen)} className="text-sm font-semibold w-full text-left" style={{ color: "#1F7A3A" }}>
+              💬 WhatsApp-Nachricht einfügen {waOffen ? "▾" : "▸"}
+            </button>
+            {waOffen && (
+              <div className="mt-2 flex flex-col gap-2">
+                <textarea style={{ ...inputStyle, minHeight: 80 }} value={waText} onChange={(e) => setWaText(e.target.value)} placeholder={"z.B. „Hallo Börni, bitte 2 Bauern, ein halbes Dinkel und 6 Dinkelkrusti 😊“"} />
+                <div className="flex gap-2 items-center flex-wrap">
+                  <Btn small onClick={async () => { try { setWaText(await navigator.clipboard.readText()); } catch (e) { alert("Einfügen nicht erlaubt – bitte lange ins Feld tippen und „Einfügen“ wählen."); } }}>📋 Aus Zwischenablage</Btn>
+                  <Btn small primary onClick={erkennen} disabled={!waText.trim()}>✨ Erkennen</Btn>
+                </div>
+                {waInfo && (
+                  <div className="text-xs" style={{ color: "#1F7A3A" }}>
+                    {Object.keys(waInfo.items).length} Sorte(n) erkannt{waInfo.kunde ? `, Kunde: ${waInfo.kunde.name}` : ""}. Bitte kurz kontrollieren.
+                    {waInfo.unbekannt.length > 0 && <div style={{ color: COL.warn }}>Nicht erkannt: {waInfo.unbekannt.join(" · ")}</div>}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="flex flex-col">
+          {sichtbar.map((s, i) => {
+            const q = items[s.id] || 0;
+            const p = preisFuer(s, kunde?.id);
+            const sonder = p !== (Number(s.preis) || 0);
+            return (
+              <div key={s.id} className="flex items-center justify-between gap-2 py-2" style={{ borderTop: i ? `1px solid ${COL.line}` : "none" }}>
+                <div className="min-w-0">
+                  <div className="font-medium truncate" style={{ color: q > 0 ? COL.ink : COL.inkMuted }}>{s.kurz} <span className="text-xs font-normal" style={{ color: COL.inkMuted }}>{s.name !== s.kurz ? s.name : ""}</span></div>
+                  <div className="text-xs" style={{ color: COL.inkMuted }}>{p > 0 ? fmtEUR(p) : "Preis fehlt"}{sonder ? " (Sonderpreis)" : ""}{q > 0 && p > 0 ? ` · ${fmtEUR(q * p)}` : ""}</div>
+                </div>
+                <Stepper value={q} halbe={s.halbe} onChange={(v) => setItems({ ...items, [s.id]: v })} />
+              </div>
+            );
+          })}
+          <button onClick={() => setAlleSorten(!alleSorten)} className="text-xs mt-1 text-left" style={{ color: COL.accent }}>
+            {alleSorten ? "Nur aktive Sorten zeigen" : `+ Weitere Sorten (${sorten.filter((s) => !s.aktiv).length})`}
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <span className="text-sm" style={{ color: COL.inkMuted }}>Rabatt</span>
+          <RabattWahl wert={rabatt} onChange={setRabatt} />
+          <Wirtschaftlichkeit w={wirtschaft} />
+        </div>
+
+        <Field label="Notiz (optional)">
+          <textarea style={{ ...inputStyle, minHeight: 50 }} value={notiz} onChange={(e) => setNotiz(e.target.value)} placeholder="z.B. geschnitten, holt selbst ab …" />
+        </Field>
+
+        <div className="flex items-center justify-between gap-2 pt-1">
+          <div className="text-lg font-semibold" style={{ fontFamily: "'Fraunces', serif" }}>{fmtEUR(summe)}</div>
+          <div className="flex gap-2">
+            <Btn onClick={onCancel}>Abbrechen</Btn>
+            <Btn primary onClick={speichern}>Speichern</Btn>
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function BestellungenTab({ backtag, sorten, kunden, lager, herstellProzent, updateBacktag, addKunde, letzteBestellung }) {
+  const [editor, setEditor] = useState(null); // null | {} | bestellung
+  const [suche, setSuche] = useState("");
+  const kName = (id) => kunden.find((k) => k.id === id)?.name || "(unbekannt)";
+  const liste = (backtag.bestellungen || [])
+    .filter((b) => !suche || kName(b.kundeId).toLowerCase().includes(suche.toLowerCase()))
+    .sort((a, b) => kName(a.kundeId).localeCompare(kName(b.kundeId), "de"));
+
+  const save = (b) => {
+    updateBacktag((bt) => {
+      const exists = bt.bestellungen.some((x) => x.id === b.id);
+      // gleicher Kunde zweimal am selben Backtag? -> zusammenführen
+      const doppelt = !exists && bt.bestellungen.find((x) => x.kundeId === b.kundeId);
+      if (doppelt) {
+        if (window.confirm(`${kName(b.kundeId)} hat schon eine Bestellung. Zusammenführen?`)) {
+          const items = { ...doppelt.items };
+          Object.entries(b.items).forEach(([sid, q]) => (items[sid] = (items[sid] || 0) + q));
+          return { ...bt, bestellungen: bt.bestellungen.map((x) => (x.id === doppelt.id ? { ...x, items, notiz: [x.notiz, b.notiz].filter(Boolean).join(" · "), nachricht: [x.nachricht, b.nachricht].filter(Boolean).join(" · ") } : x)) };
+        }
+      }
+      return { ...bt, bestellungen: exists ? bt.bestellungen.map((x) => (x.id === b.id ? b : x)) : [...bt.bestellungen, { ...b, erfasst: new Date().toISOString() }] };
+    });
+    setEditor(null);
+  };
+  const remove = (b) => {
+    if (!window.confirm(`Bestellung von ${kName(b.kundeId)} löschen?`)) return;
+    updateBacktag((bt) => ({ ...bt, bestellungen: bt.bestellungen.filter((x) => x.id !== b.id) }));
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      {editor ? (
+        <BestellEditor
+          start={editor.id ? { ...editor, kundeName: kName(editor.kundeId) } : null}
+          sorten={sorten}
+          kunden={kunden}
+          lager={lager}
+          herstellProzent={herstellProzent}
+          letzteBestellung={letzteBestellung}
+          onSave={save}
+          onCancel={() => setEditor(null)}
+          onNeuerKunde={addKunde}
+        />
+      ) : (
+        <button
+          onClick={() => setEditor({})}
+          className="w-full flex items-center justify-center gap-2 text-base font-semibold py-4 rounded-2xl"
+          style={{ backgroundColor: COL.accent, color: "#fff", boxShadow: "0 4px 14px rgba(196,98,45,0.35)" }}
+        >
+          <IcPlus size={20} /> Bestellung eintragen
+        </button>
+      )}
+
+      {(backtag.bestellungen || []).length > 4 && (
+        <input style={inputStyle} placeholder="🔍 Kunde suchen …" value={suche} onChange={(e) => setSuche(e.target.value)} />
+      )}
+
+      {(backtag.bestellungen || []).length === 0 ? (
+        <Card><p className="text-sm text-center py-8" style={{ color: COL.inkMuted }}>🥖 Noch keine Bestellungen für {fmtDatum(backtag.datum)}.</p></Card>
+      ) : (
+        liste.map((b) => (
+          <Card key={b.id} className="!p-3.5">
+            <div className="flex items-start justify-between gap-2">
+              <button className="text-left flex-1 min-w-0" onClick={() => setEditor(b)}>
+                <div className="font-semibold flex items-center gap-1.5">
+                  {kName(b.kundeId)}
+                  <span className="text-xs">{b.quelle === "whatsapp" ? "💬" : "✍️"}</span>
+                  {Number(b.rabatt) > 0 && <span className="text-xs font-semibold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: COL.warnSoft, color: COL.warn }}>−{b.rabatt} %</span>}
+                </div>
+                <div className="text-sm mt-0.5" style={{ color: COL.inkMuted }}>{bestellText(b, sorten)}</div>
+                {b.notiz && <div className="text-xs mt-1 truncate" style={{ color: COL.amber }}>📝 {b.notiz}</div>}
+                {b.nachricht && <div className="text-xs mt-1 truncate" style={{ color: "#1F7A3A" }}>💬 „{b.nachricht}“</div>}
+              </button>
+              <div className="flex flex-col items-end gap-1.5">
+                <div className="font-semibold" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtEUR(bestellSumme(b, sorten))}</div>
+                <div className="flex gap-1">
+                  <button onClick={() => setEditor(b)} className="p-1.5 rounded-lg" style={{ color: COL.inkMuted }} aria-label="Bearbeiten"><IcEdit size={15} /></button>
+                  <button onClick={() => remove(b)} className="p-1.5 rounded-lg" style={{ color: COL.warn }} aria-label="Löschen"><IcTrash size={15} /></button>
+                </div>
+              </div>
+            </div>
+          </Card>
+        ))
+      )}
+    </div>
+  );
+}
+
+// ---------- Backzettel ----------
+function BackzettelTab({ backtag, sorten, lager, onUebergeben, onReloadLager, onDrucken }) {
+  const bz = useMemo(() => berechneBackzettel(backtag, sorten, lager), [backtag, sorten, lager]);
+  const [offen, setOffen] = useState({});
+  const umsatz = (backtag.bestellungen || []).reduce((s, b) => s + bestellSumme(b, sorten), 0);
+  const matName = (id) => lager?.materials?.find((m) => m.id === id)?.name || "?";
+
+  if (!lager) {
+    return <Card><p className="text-sm" style={{ color: COL.warn }}>Rezepte aus der Lager-App konnten nicht geladen werden. <button className="underline" onClick={onReloadLager}>Nochmal versuchen</button></p></Card>;
+  }
+  if (bz.proSorte.length === 0) {
+    return <Card><p className="text-sm text-center py-8" style={{ color: COL.inkMuted }}>📋 Der Backzettel entsteht automatisch, sobald Bestellungen eingetragen sind.</p></Card>;
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+
+      <div className="grid grid-cols-3 gap-2">
+        {[["🥖", fmtNum(bz.stueckGesamt), "Stück"], ["⚖️", fmtG(bz.teigGesamt), "Teig"], ["💶", fmtEUR(umsatz), "Umsatz"]].map(([e, v, l]) => (
+          <Card key={l} className="!p-3 text-center">
+            <div className="text-lg">{e}</div>
+            <div className="font-semibold text-base sm:text-lg leading-tight" style={{ fontFamily: "'Fraunces', serif" }}>{v}</div>
+            <div className="text-xs" style={{ color: COL.inkMuted }}>{l}</div>
+          </Card>
+        ))}
+      </div>
+
+      {bz.fehlend.length > 0 && (
+        <div className="text-sm px-4 py-3 rounded-2xl no-print" style={{ backgroundColor: COL.warnSoft, color: COL.warn }}>
+          ⚠️ Ohne Rezept (fehlen im Teig): <b>{bz.fehlend.map((s) => s.kurz).join(", ")}</b>. Unter Einstellungen → Sorten ein Rezept zuordnen.
+        </div>
+      )}
+      {bz.verwaist.length > 0 && (
+        <div className="text-sm px-4 py-3 rounded-2xl no-print" style={{ backgroundColor: COL.warnSoft, color: COL.warn }}>
+          ⚠️ <b>{bz.verwaist.join(", ")}</b> fehlt in der Lager-App (gelöschter Rohstoff oder neues Rezept) – dieser Anteil wird nicht berechnet und nicht abgebucht.
+          Öffne einmal die <a href={LAGER_APP_URL} className="underline">Lager-App</a> (sie repariert das automatisch) und tippe dann unter Einstellungen → App auf „Rezepte & Lagerstand neu laden“.
+        </div>
+      )}
+
+      <Card>
+        <H2>🥖 Stück pro Sorte</H2>
+        <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${COL.line}` }}>
+          {bz.proSorte.map(({ sorte, stueck }, i) => (
+            <div key={sorte.id} className="flex items-center justify-between px-3 py-2.5" style={{ backgroundColor: i % 2 ? COL.bg : COL.surface }}>
+              <span className="font-medium">{sorte.kurz} <span className="text-xs font-normal" style={{ color: COL.inkMuted }}>{sorte.name !== sorte.kurz ? sorte.name : ""}</span></span>
+              <span className="text-lg font-bold" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtQty(stueck)}</span>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {bz.zugaben.length > 0 && (
+        <Card>
+          <H2>🥜 Zugaben</H2>
+          <p className="text-xs -mt-2 mb-3" style={{ color: COL.inkMuted }}>Kommen zum fertigen Teig dazu, z.B. Walnüsse ins Nussbrot oder Zimtzucker in die Zimtschnecken</p>
+          <div className="flex flex-col gap-2">
+            {bz.zugaben.map((z) => (
+              <div key={z.name} className="flex items-center justify-between gap-2 rounded-xl px-3 py-2" style={{ backgroundColor: COL.bg }}>
+                <div>
+                  <div className="font-semibold">{z.mat ? z.name : `⚠ ${z.name} (nicht im Lager)`}</div>
+                  <div className="text-xs" style={{ color: COL.inkMuted }}>{z.fuer.map((f) => `${fmtQty(f.stueck)}× ${f.kurz} à ${fmtG(f.g)}`).join(" · ")}</div>
+                </div>
+                <span className="text-lg font-bold" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtG(z.menge)}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {bz.vorstufen.length > 0 && (
+        <Card style={{ border: `2px solid ${COL.wheat}` }}>
+          <H2>🫙 Vorstufen ansetzen</H2>
+          <p className="text-xs -mt-2 mb-3" style={{ color: COL.inkMuted }}>Gesamtmenge für alle Teige zusammen</p>
+          <div className="flex flex-col gap-2">
+            {bz.vorstufen.map((v) => (
+              <div key={v.name} className="rounded-xl p-3" style={{ backgroundColor: COL.amberSoft }}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold">{v.name}</span>
+                  <span className="text-lg font-bold" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtG(v.menge)}</span>
+                </div>
+                {v.teile.length > 0 && (
+                  <div className="text-sm mt-1" style={{ color: COL.amber }}>
+                    = {v.teile.map((t) => `${fmtG(t.menge)} ${t.mat?.name || "⚠ gelöschter Rohstoff"}`).join(" + ")}
+                  </div>
+                )}
+                <div className="text-xs mt-0.5" style={{ color: COL.inkMuted }}>für {v.fuer.join(", ")}</div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      <Card>
+        <H2>🍞 Teige</H2>
+        <div className="flex flex-col gap-2">
+          {bz.teige.map((t) => {
+            const auf = offen[t.rezept.name] ?? true;
+            let letzteGruppe = null;
+            return (
+              <div key={t.rezept.name} className="rounded-xl print-card" style={{ border: `1px solid ${COL.line}` }}>
+                <button className="w-full text-left p-3 flex items-center justify-between gap-2" onClick={() => setOffen({ ...offen, [t.rezept.name]: !auf })}>
+                  <div>
+                    <div className="font-semibold" style={{ fontFamily: "'Fraunces', serif" }}>{t.rezept.name}</div>
+                    <div className="text-xs" style={{ color: COL.inkMuted }}>
+                      {t.sorten.map((s) => `${fmtQty(s.stueck)}× ${s.kurz} à ${fmtG(s.g)}`).join(" · ")} · Faktor ×{fmtNum(t.faktor, 2)}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-bold" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtG(t.teigG)}</div>
+                    <div className="text-xs no-print" style={{ color: COL.inkMuted }}>{auf ? "▾" : "▸"}</div>
+                  </div>
+                </button>
+                {auf && (
+                  <div className="px-3 pb-3">
+                    {t.items.map((it, i) => {
+                      const kopf = it.gruppe && it.gruppe !== letzteGruppe ? it.gruppe : null;
+                      letzteGruppe = it.gruppe || null;
+                      return (
+                        <React.Fragment key={i}>
+                          {kopf && <div className="text-xs font-semibold uppercase mt-2 mb-1" style={{ color: COL.accent, letterSpacing: "0.06em" }}>{kopf}</div>}
+                          <div className="flex justify-between text-sm py-1" style={{ borderTop: i && !kopf ? `1px dashed ${COL.line}` : "none" }}>
+                            <span>{matName(it.materialId)}</span>
+                            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600 }}>{fmtG(it.menge)}</span>
+                          </div>
+                        </React.Fragment>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
+      <Card className="no-print">
+        <H2>📦 Rohstoffbedarf gesamt</H2>
+        <p className="text-xs -mt-2 mb-3" style={{ color: COL.inkMuted }}>Sauerteig & Kochstücke sind hier schon in Mehl und Wasser aufgelöst – so wird es im Lager abgebucht.</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6">
+          {bz.rohstoffe.map((r) => {
+            const knapp = r.mat.stock < r.menge;
+            return (
+              <div key={r.materialId} className="flex justify-between text-sm py-1.5" style={{ borderBottom: `1px dashed ${COL.line}` }}>
+                <span>{r.mat.name}</span>
+                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, color: knapp ? COL.warn : COL.ink }} title={`Lagerstand: ${fmtG(r.mat.stock)}`}>
+                  {fmtG(r.menge)} {knapp ? "⚠️" : ""}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        <p className="text-xs mt-2" style={{ color: COL.inkMuted }}>⚠️ = laut Lager-App nicht genug am Lager</p>
+      </Card>
+
+      <div className="flex flex-wrap gap-2 no-print">
+        <Btn onClick={() => onDrucken("backzettel")}><IcPrint size={16} /> Backzettel drucken</Btn>
+        <Btn primary onClick={() => onUebergeben(bz)} disabled={!bz.rohstoffe.length}>
+          <IcSend size={16} /> {backtag.lagerUebergeben ? "Nochmal an Lager-App senden" : "An Lager-App übergeben"}
+        </Btn>
+      </div>
+      {backtag.lagerUebergeben && (
+        <div className="text-sm no-print" style={{ color: COL.ok }}>✅ Am {new Date(backtag.lagerUebergeben).toLocaleString("de-DE")} an die Lager-App übergeben.</div>
+      )}
+    </div>
+  );
+}
+
+// ---------- Druckvorlagen ----------
+const Box = () => <span className="box" />;
+
+function DruckKopf({ titel, datum, rechts }) {
+  return (
+    <div className="flex items-end justify-between gap-4 mb-2" style={{ borderBottom: "3px solid #111", paddingBottom: 6 }}>
+      <div>
+        <div style={{ fontFamily: "'Zilla Slab', serif", fontWeight: 700, fontSize: "9pt", letterSpacing: "0.25em" }}>BÖRNI´S BACKSTUBE</div>
+        <h1>{titel}</h1>
+        <div style={{ fontSize: "13pt", fontWeight: 600 }}>{fmtDatum(datum)}</div>
+      </div>
+      <div className="text-right" style={{ fontSize: "9.5pt" }}>
+        {rechts}
+        <div style={{ color: "#777", fontSize: "8pt", marginTop: 2 }}>gedruckt {new Date().toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })}</div>
+      </div>
+    </div>
+  );
+}
+
+function BackzettelDruck({ backtag, sorten, kunden, lager, mitRohstoffen }) {
+  const bz = berechneBackzettel(backtag, sorten, lager);
+  const matName = (id) => lager?.materials?.find((m) => m.id === id)?.name || "?";
+  const kName = (id) => kunden.find((k) => k.id === id)?.name || "?";
+  const notizen = (backtag.bestellungen || []).filter((b) => b.notiz).sort((a, b) => kName(a.kundeId).localeCompare(kName(b.kundeId), "de"));
+  const gStk = (s) => gProStueck(s, findRezept(lager?.recipes || [], s.rezept));
+
+  return (
+    <>
+      <DruckKopf
+        titel="Backzettel"
+        datum={backtag.datum}
+        rechts={
+          <>
+            <div><b>{fmtNum(bz.stueckGesamt)}</b> Stück · <b>{fmtG(bz.teigGesamt)}</b> Teig</div>
+            <div>{backtag.bestellungen.length} Bestellungen</div>
+          </>
+        }
+      />
+      {bz.fehlend.length > 0 && (
+        <div style={{ border: "1.5px solid #111", padding: "4px 8px", margin: "8px 0", fontWeight: 600 }}>
+          ⚠ Ohne Rezept – nicht im Teig berechnet: {bz.fehlend.map((s) => s.kurz).join(", ")}
+        </div>
+      )}
+
+      <h2>Stück pro Sorte</h2>
+      <table>
+        <thead>
+          <tr><th style={{ width: 18 }}></th><th>Sorte</th><th className="zahl">Stück</th><th className="zahl">g / Stück</th><th className="zahl">Teig</th></tr>
+        </thead>
+        <tbody>
+          {bz.proSorte.map(({ sorte, stueck }) => (
+            <tr key={sorte.id}>
+              <td><Box /></td>
+              <td><b>{sorte.kurz}</b> <span style={{ color: "#666" }}>{sorte.name !== sorte.kurz ? sorte.name : ""}</span></td>
+              <td className="zahl" style={{ fontSize: "13pt" }}>{fmtQty(stueck)}</td>
+              <td className="zahl" style={{ fontWeight: 400 }}>{gStk(sorte) ? fmtG(gStk(sorte)) : "–"}</td>
+              <td className="zahl">{gStk(sorte) ? fmtG(gStk(sorte) * stueck) : "–"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {bz.vorstufen.length > 0 && (
+        <>
+          <h2>Vorstufen ansetzen</h2>
+          <table>
+            <thead>
+              <tr><th style={{ width: 18 }}></th><th>Vorstufe</th><th className="zahl">Menge</th><th>Zusammensetzung</th><th>für</th></tr>
+            </thead>
+            <tbody>
+              {bz.vorstufen.map((v) => (
+                <tr key={v.name}>
+                  <td><Box /></td>
+                  <td><b>{v.name}</b></td>
+                  <td className="zahl" style={{ fontSize: "12pt" }}>{fmtG(v.menge)}</td>
+                  <td>{v.teile.map((t) => `${fmtG(t.menge)} ${t.mat?.name || "⚠ gelöschter Rohstoff"}`).join(" + ") || "–"}</td>
+                  <td style={{ fontSize: "8.5pt", color: "#555" }}>{v.fuer.join(", ")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      {bz.zugaben.length > 0 && (
+        <>
+          <h2>Zugaben</h2>
+          <table>
+            <thead>
+              <tr><th style={{ width: 18 }}></th><th>Zugabe</th><th className="zahl">Menge</th><th>für</th></tr>
+            </thead>
+            <tbody>
+              {bz.zugaben.map((z) => (
+                <tr key={z.name}>
+                  <td><Box /></td>
+                  <td><b>{z.name}</b></td>
+                  <td className="zahl" style={{ fontSize: "12pt" }}>{fmtG(z.menge)}</td>
+                  <td style={{ fontSize: "8.5pt", color: "#555" }}>{z.fuer.map((f) => `${fmtQty(f.stueck)}× ${f.kurz} à ${fmtG(f.g)}`).join(" · ")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      {notizen.length > 0 && (
+        <>
+          <h2>Hinweise der Kunden</h2>
+          <table>
+            <tbody>
+              {notizen.map((b) => (
+                <tr key={b.id}><td style={{ width: 18 }}><Box /></td><td style={{ width: "30%" }}><b>{kName(b.kundeId)}</b></td><td>{b.notiz}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      <h2>Teige</h2>
+      <div className="druck-spalten">
+        {bz.teige.map((t) => {
+          let letzte = null;
+          return (
+            <div key={t.rezept.name} className="druck-block" style={{ border: "1.5px solid #111", borderRadius: 6, padding: "5px 7px" }}>
+              <div className="flex justify-between items-baseline gap-2">
+                <b style={{ fontFamily: "'Fraunces', serif", fontSize: "12pt" }}>{t.rezept.name}</b>
+                <b className="zahl" style={{ fontSize: "12pt", fontFamily: "'IBM Plex Mono', monospace" }}>{fmtG(t.teigG)}</b>
+              </div>
+              <div style={{ fontSize: "8.5pt", color: "#555", marginBottom: 3 }}>
+                {t.sorten.map((s) => `${fmtQty(s.stueck)}× ${s.kurz} à ${fmtG(s.g)}`).join(" · ")} · ×{fmtNum(t.faktor, 2)} Ansatz
+              </div>
+              <table>
+                <tbody>
+                  {t.items.map((it, i) => {
+                    const kopf = it.gruppe && it.gruppe !== letzte ? it.gruppe : null;
+                    letzte = it.gruppe || null;
+                    return (
+                      <React.Fragment key={i}>
+                        {kopf && (
+                          <tr><td colSpan={3} style={{ fontSize: "8pt", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", borderBottom: "none", paddingTop: 5 }}>{kopf}</td></tr>
+                        )}
+                        <tr>
+                          <td style={{ width: 16, padding: "2px 3px" }}><Box /></td>
+                          <td style={{ padding: "2px 3px" }}>{matName(it.materialId)}</td>
+                          <td className="zahl" style={{ padding: "2px 3px" }}>{fmtG(it.menge)}</td>
+                        </tr>
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {t.rezept.backen && <div style={{ fontSize: "8.5pt", marginTop: 3 }}>🔥 {t.rezept.backen}</div>}
+            </div>
+          );
+        })}
+      </div>
+
+      {mitRohstoffen && bz.rohstoffe.length > 0 && (
+        <>
+          <h2>Rohstoffbedarf gesamt (Sauerteig & Kochstücke aufgelöst)</h2>
+          <div className="druck-spalten" style={{ columnCount: 3 }}>
+            {bz.rohstoffe.map((r) => (
+              <div key={r.materialId} className="flex justify-between" style={{ breakInside: "avoid", borderBottom: "1px solid #ccc", padding: "2px 0" }}>
+                <span>{r.mat.name}</span>
+                <span className="zahl">{fmtG(r.menge)}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+function KundenzettelDruck({ backtag, sorten, kunden, mitPreisen }) {
+  const kName = (id) => kunden.find((k) => k.id === id)?.name || "?";
+  const liste = [...(backtag.bestellungen || [])].sort((a, b) => kName(a.kundeId).localeCompare(kName(b.kundeId), "de"));
+  return (
+    <div className="zettel-raster">
+      {liste.map((b) => {
+        const summe = bestellSumme(b, sorten);
+        return (
+          <div key={b.id} className="zettel">
+            <div className="flex justify-between items-baseline" style={{ fontSize: "8pt" }}>
+              <span style={{ fontFamily: "'Zilla Slab', serif", fontWeight: 700, letterSpacing: "0.2em" }}>BÖRNI´S BACKSTUBE</span>
+              <span>{fmtDatum(backtag.datum)}</span>
+            </div>
+            <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: "16pt", margin: "4px 0 6px" }}>{kName(b.kundeId)}</div>
+            <table>
+              <tbody>
+                {sorten.filter((s) => (b.items[s.id] || 0) > 0).map((s) => (
+                  <tr key={s.id}>
+                    <td style={{ width: 16, padding: "3px 2px" }}><Box /></td>
+                    <td className="zahl" style={{ width: 34, padding: "3px 4px", fontSize: "12pt" }}>{fmtQty(b.items[s.id])}×</td>
+                    <td style={{ padding: "3px 2px" }}>{s.name}</td>
+                    {mitPreisen && <td className="zahl" style={{ fontWeight: 400, padding: "3px 2px" }}>{preisFuer(s, b.kundeId) > 0 ? fmtEUR(b.items[s.id] * preisFuer(s, b.kundeId)) : ""}</td>}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {b.notiz && <div style={{ fontStyle: "italic", fontSize: "9pt", marginTop: 4 }}>📝 {b.notiz}</div>}
+            {mitPreisen && Number(b.rabatt) > 0 && (
+              <div style={{ marginTop: 6, fontSize: "9.5pt" }}>
+                <div className="flex justify-between"><span>Summe</span><span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtEUR(bestellBrutto(b, sorten))}</span></div>
+                <div className="flex justify-between"><span>Rabatt {b.rabatt} %</span><span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>−{fmtEUR(bestellRabatt(b, sorten))}</span></div>
+              </div>
+            )}
+            {mitPreisen && (
+              <div className="flex justify-between items-center" style={{ marginTop: 6, paddingTop: 4, borderTop: "2px solid #111" }}>
+                <span style={{ fontWeight: 700 }}>{b.bezahlt ? "✓ bezahlt – danke!" : "Zu zahlen"}</span>
+                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: "14pt", textDecoration: b.bezahlt ? "line-through" : "none" }}>{fmtEUR(summe)}</span>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function lieferlisteSpalten(backtag, sorten) {
+  return sorten.filter((s) => (backtag.bestellungen || []).some((b) => (b.items[s.id] || 0) > 0));
+}
+
+function LieferlisteDruck({ backtag, sorten, kunden }) {
+  const kName = (id) => kunden.find((k) => k.id === id)?.name || "?";
+  const liste = [...(backtag.bestellungen || [])].sort((a, b) => kName(a.kundeId).localeCompare(kName(b.kundeId), "de"));
+  const spalten = lieferlisteSpalten(backtag, sorten);
+  const gesamt = liste.reduce((s, b) => s + bestellSumme(b, sorten), 0);
+  const offen = liste.filter((b) => !b.bezahlt).reduce((s, b) => s + bestellSumme(b, sorten), 0);
+  const hatRabatt = liste.some((b) => Number(b.rabatt) > 0);
+  return (
+    <>
+      <DruckKopf
+        titel="Lieferliste"
+        datum={backtag.datum}
+        rechts={
+          <>
+            <div>{liste.length} Kunden · Gesamt <b>{fmtEUR(gesamt)}</b></div>
+            <div>davon offen <b>{fmtEUR(offen)}</b></div>
+          </>
+        }
+      />
+      <table style={{ marginTop: 8 }}>
+        <thead>
+          <tr>
+            <th>Kunde</th>
+            {spalten.map((s) => <th key={s.id} className="zahl" style={{ textAlign: "center" }}>{s.kurz}</th>)}
+            {hatRabatt && <th className="zahl">Rabatt</th>}
+            <th className="zahl">€</th>
+            <th style={{ textAlign: "center" }}>bez.</th>
+          </tr>
+        </thead>
+        <tbody>
+          {liste.map((b, i) => (
+            <tr key={b.id} style={{ backgroundColor: i % 2 ? "#F3F3F3" : "#fff" }}>
+              <td>
+                <b>{kName(b.kundeId)}</b>
+                {b.notiz && <div style={{ fontSize: "8pt", fontStyle: "italic" }}>{b.notiz}</div>}
+              </td>
+              {spalten.map((s) => (
+                <td key={s.id} className="zahl" style={{ textAlign: "center", fontSize: "11pt" }}>{b.items[s.id] ? fmtQty(b.items[s.id]) : ""}</td>
+              ))}
+              {hatRabatt && <td className="zahl" style={{ fontWeight: 400 }}>{Number(b.rabatt) > 0 ? `−${b.rabatt} %` : ""}</td>}
+              <td className="zahl">{fmtEUR(bestellSumme(b, sorten))}</td>
+              <td style={{ textAlign: "center" }}>{b.bezahlt ? "✓" : <Box />}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr style={{ borderTop: "2px solid #111" }}>
+            <td style={{ fontWeight: 700, borderTop: "2px solid #111" }}>Summe</td>
+            {spalten.map((s) => (
+              <td key={s.id} className="zahl" style={{ textAlign: "center", borderTop: "2px solid #111", fontSize: "11pt" }}>
+                {fmtQty(liste.reduce((sum, b) => sum + (b.items[s.id] || 0), 0))}
+              </td>
+            ))}
+            {hatRabatt && <td className="zahl" style={{ borderTop: "2px solid #111" }}>−{fmtEUR(liste.reduce((s, b) => s + bestellRabatt(b, sorten), 0))}</td>}
+            <td className="zahl" style={{ borderTop: "2px solid #111" }}>{fmtEUR(gesamt)}</td>
+            <td style={{ borderTop: "2px solid #111" }}></td>
+          </tr>
+        </tfoot>
+      </table>
+    </>
+  );
+}
+
+const DRUCK_ARTEN = [
+  { key: "backzettel", label: "📋 Backzettel" },
+  { key: "kundenzettel", label: "✂️ Kundenzettel" },
+  { key: "lieferliste", label: "🧾 Lieferliste" },
+];
+
+function DruckAnsicht({ art, setArt, backtag, sorten, kunden, lager, onClose }) {
+  const [mitRohstoffen, setMitRohstoffen] = useState(false);
+  const [mitPreisen, setMitPreisen] = useState(true);
+  const quer = art === "lieferliste" && lieferlisteSpalten(backtag, sorten).length > 7;
+  const leer = !(backtag.bestellungen || []).length;
+
+  useEffect(() => {
+    const prev = document.title;
+    // Der Dateiname beim "Als PDF speichern" kommt vom Seitentitel
+    document.title = `${DRUCK_ARTEN.find((d) => d.key === art).label.replace(/^\S+\s/, "")} ${backtag.datum}`;
+    return () => (document.title = prev);
+  }, [art, backtag.datum]);
+
+  return (
+    <div className="druck-overlay">
+      <style>{`@page { size: A4 ${quer ? "landscape" : "portrait"}; margin: 10mm; }`}</style>
+      <div className="no-print sticky top-0 z-10 px-3 py-3 mb-4 flex flex-wrap items-center gap-2" style={{ backgroundColor: COL.crust, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}>
+        <div className="flex gap-1 p-1 rounded-xl" style={{ backgroundColor: "rgba(255,255,255,0.1)" }}>
+          {DRUCK_ARTEN.map((d) => (
+            <button key={d.key} onClick={() => setArt(d.key)} className="text-sm px-2.5 py-1.5 rounded-lg whitespace-nowrap" style={{ backgroundColor: art === d.key ? COL.wheat : "transparent", color: art === d.key ? COL.crust : "#fff", fontWeight: art === d.key ? 600 : 400 }}>
+              {d.label}
+            </button>
+          ))}
+        </div>
+        {art === "backzettel" && (
+          <label className="text-sm flex items-center gap-1.5"><input type="checkbox" checked={mitRohstoffen} onChange={(e) => setMitRohstoffen(e.target.checked)} /> Rohstoffbedarf mitdrucken</label>
+        )}
+        {art === "kundenzettel" && (
+          <label className="text-sm flex items-center gap-1.5"><input type="checkbox" checked={mitPreisen} onChange={(e) => setMitPreisen(e.target.checked)} /> mit Preisen</label>
+        )}
+        <div className="flex gap-2 ml-auto">
+          <button onClick={() => window.print()} disabled={leer} className="flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-xl" style={{ backgroundColor: COL.accent, color: "#fff", opacity: leer ? 0.5 : 1 }}>
+            <IcPrint size={16} /> Drucken
+          </button>
+          <button onClick={onClose} className="text-sm px-3 py-2 rounded-xl" style={{ border: "1px solid rgba(255,255,255,0.3)" }}>Schließen</button>
+        </div>
+      </div>
+      <div className={`druck-blatt ${quer ? "quer" : ""}`}>
+        {leer ? (
+          <p>Für diesen Backtag gibt es noch keine Bestellungen.</p>
+        ) : art === "backzettel" ? (
+          <BackzettelDruck backtag={backtag} sorten={sorten} kunden={kunden} lager={lager} mitRohstoffen={mitRohstoffen} />
+        ) : art === "kundenzettel" ? (
+          <KundenzettelDruck backtag={backtag} sorten={sorten} kunden={kunden} mitPreisen={mitPreisen} />
+        ) : (
+          <LieferlisteDruck backtag={backtag} sorten={sorten} kunden={kunden} />
+        )}
+      </div>
+      <p className="no-print text-center text-xs pb-8" style={{ color: COL.inkMuted }}>
+        Tipp: Am Handy im Druckmenü kannst du auch „Als PDF sichern“ wählen und den Zettel z.B. per WhatsApp weiterschicken.
+      </p>
+    </div>
+  );
+}
+
+// ---------- Kunden & Kassa ----------
+function KassaTab({ backtag, sorten, kunden, lager, herstellProzent, updateBacktag, onDrucken }) {
+  const kName = (id) => kunden.find((k) => k.id === id)?.name || "(unbekannt)";
+  const liste = [...(backtag.bestellungen || [])].sort((a, b) => kName(a.kundeId).localeCompare(kName(b.kundeId), "de"));
+  const gesamt = liste.reduce((s, b) => s + bestellSumme(b, sorten), 0);
+  const bezahlt = liste.filter((b) => b.bezahlt).reduce((s, b) => s + bestellSumme(b, sorten), 0);
+  const toggle = (b) => updateBacktag((bt) => ({ ...bt, bestellungen: bt.bestellungen.map((x) => (x.id === b.id ? { ...x, bezahlt: !x.bezahlt } : x)) }));
+  const setzeRabatt = (b, r) => updateBacktag((bt) => ({ ...bt, bestellungen: bt.bestellungen.map((x) => (x.id === b.id ? { ...x, rabatt: r } : x)) }));
+  const [rabattOffen, setRabattOffen] = useState(null);
+
+  // Auswertung für den ganzen Backtag
+  const wListe = useMemo(() => liste.map((b) => ({ b, w: bestellWirtschaft(b, sorten, lager, herstellProzent) })), [liste, sorten, lager, herstellProzent]);
+  const summe = (f) => runden2(wListe.reduce((s, x) => s + x.w[f], 0));
+  const mitRabatt = wListe.filter((x) => x.w.rabattProzent > 0);
+  const tag = {
+    brutto: summe("brutto"), rabatt: summe("rabatt"), netto: summe("netto"), kosten: summe("kosten"), db: summe("db"),
+    herstell: summe("herstell"), verpackung: summe("verpackung"), gewinn: summe("gewinn"), gewinnOhneRabatt: summe("gewinnOhneRabatt"),
+    herstellProzent: Number(herstellProzent) || 0, rabattProzent: 0, ohnePreis: new Set(wListe.flatMap((x) => [...x.w.ohnePreis])), unbekannt: wListe.some((x) => x.w.unbekannt),
+  };
+
+  const waLink = (b) => {
+    const zeilen = sorten.filter((s) => (b.items[s.id] || 0) > 0).map((s) => `${fmtQty(b.items[s.id])}× ${s.name} (${fmtEUR(b.items[s.id] * preisFuer(s, b.kundeId))})`);
+    const rabattZeilen = Number(b.rabatt) > 0 ? `\nSumme: ${fmtEUR(bestellBrutto(b, sorten))}\nRabatt ${b.rabatt} %: −${fmtEUR(bestellRabatt(b, sorten))}` : "";
+    const text = `Hallo ${kName(b.kundeId).split(" ")[0]}! 🍞\nDeine Bestellung für ${fmtDatum(backtag.datum)}:\n${zeilen.join("\n")}${rabattZeilen}\nZu zahlen: ${fmtEUR(bestellSumme(b, sorten))}\n\nLiebe Grüße, Börni's Backstube`;
+    return `https://wa.me/?text=${encodeURIComponent(text)}`;
+  };
+
+  if (!liste.length) return <Card><p className="text-sm text-center py-8" style={{ color: COL.inkMuted }}>👥 Noch keine Bestellungen.</p></Card>;
+
+  return (
+    <div className="flex flex-col gap-3">
+      <Card className="!p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-xs" style={{ color: COL.inkMuted }}>Gesamt · {liste.length} Kunden</div>
+            <div className="text-2xl font-semibold" style={{ fontFamily: "'Fraunces', serif" }}>{fmtEUR(gesamt)}</div>
+          </div>
+          <div className="text-right text-sm">
+            <div style={{ color: COL.ok }}>✅ bezahlt {fmtEUR(bezahlt)}</div>
+            <div style={{ color: COL.warn }}>⏳ offen {fmtEUR(gesamt - bezahlt)}</div>
+          </div>
+        </div>
+        <div className="h-2 rounded-full mt-3 overflow-hidden" style={{ backgroundColor: COL.warnSoft }}>
+          <div className="h-full rounded-full" style={{ width: `${gesamt ? (bezahlt / gesamt) * 100 : 0}%`, backgroundColor: COL.ok, transition: "width .3s" }} />
+        </div>
+      </Card>
+
+      <Card className="!p-4 no-print">
+        <H2>📊 Rabatt, Deckungsbeitrag & Gewinn</H2>
+        <Wirtschaftlichkeit
+          w={tag}
+          nettoLabel="Einnahmen"
+          mitRabatt={tag.rabatt > 0}
+          rabattLabel={`Verlust durch Rabatte (${mitRabatt.length} Bestellung${mitRabatt.length > 1 ? "en" : ""})`}
+        />
+        <div className="text-xs mt-2" style={{ color: COL.inkMuted }}>Steht nicht auf Backzettel und Kundenzetteln.</div>
+      </Card>
+
+      {liste.map((b) => (
+        <Card key={b.id} className="!p-3.5" style={{ opacity: b.bezahlt ? 0.7 : 1 }}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="font-semibold">{kName(b.kundeId)}</div>
+              <div className="text-sm mt-1 flex flex-col">
+                {sorten.filter((s) => (b.items[s.id] || 0) > 0).map((s) => (
+                  <span key={s.id}>
+                    <b style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtQty(b.items[s.id])}×</b> {s.name}{" "}
+                    <span style={{ color: COL.inkMuted }}>{preisFuer(s, b.kundeId) > 0 ? fmtEUR(b.items[s.id] * preisFuer(s, b.kundeId)) : "(Preis fehlt)"}</span>
+                  </span>
+                ))}
+              </div>
+              {b.notiz && <div className="text-xs mt-1 truncate" style={{ color: COL.amber, maxWidth: "100%" }}>📝 {b.notiz}</div>}
+              {Number(b.rabatt) > 0 && (
+                <div className="text-xs mt-1" style={{ color: COL.warn }}>
+                  Rabatt {b.rabatt} %: −{fmtEUR(bestellRabatt(b, sorten))} (statt {fmtEUR(bestellBrutto(b, sorten))})
+                </div>
+              )}
+              <button onClick={() => setRabattOffen(rabattOffen === b.id ? null : b.id)} className="text-xs mt-1 no-print underline" style={{ color: COL.inkMuted }}>
+                {rabattOffen === b.id ? "Rabatt & Deckungsbeitrag schließen" : "Rabatt & Deckungsbeitrag"}
+              </button>
+              {rabattOffen === b.id && (
+                <div className="mt-2 flex flex-col gap-2 no-print">
+                  <RabattWahl klein wert={b.rabatt} onChange={(r) => setzeRabatt(b, r)} />
+                  <Wirtschaftlichkeit w={wListe.find((x) => x.b.id === b.id)?.w || bestellWirtschaft(b, sorten, lager, herstellProzent)} />
+                </div>
+              )}
+            </div>
+            <div className="flex flex-col items-end gap-2">
+              <div className="text-lg font-bold" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtEUR(bestellSumme(b, sorten))}</div>
+              <button onClick={() => toggle(b)} className="text-xs font-semibold px-2.5 py-1.5 rounded-full" style={{ backgroundColor: b.bezahlt ? COL.okSoft : COL.warnSoft, color: b.bezahlt ? COL.ok : COL.warn }}>
+                {b.bezahlt ? "✅ bezahlt" : "⏳ offen"}
+              </button>
+              <a href={waLink(b)} target="_blank" rel="noopener" className="text-xs no-print" style={{ color: "#1F7A3A" }}>💬 per WhatsApp</a>
+            </div>
+          </div>
+        </Card>
+      ))}
+      <div className="no-print flex flex-wrap gap-2">
+        <Btn onClick={() => onDrucken("kundenzettel")}><IcPrint size={16} /> Kundenzettel drucken</Btn>
+        <Btn onClick={() => onDrucken("lieferliste")}><IcPrint size={16} /> Lieferliste drucken</Btn>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Einstellungen ----------
+function EinstellungenTab({ daten, setDaten, lager, config, onReloadLager, onDisconnect, letzterStand, onAbgleichen, onSpeicherPruefen }) {
+  const [bereich, setBereich] = useState("sorten");
+  const [neueKunden, setNeueKunden] = useState("");
+  const [zeigeLink, setZeigeLink] = useState(false);
+  const rezepte = [...(lager?.recipes || [])].sort((a, b) => a.name.localeCompare(b.name, "de"));
+  const setSorten = (fn) => setDaten((d) => ({ ...d, sorten: fn(d.sorten) }));
+  const upd = (id, patch) => setSorten((ss) => ss.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+  const move = (idx, dir) =>
+    setSorten((ss) => {
+      const n = [...ss];
+      const j = idx + dir;
+      if (j < 0 || j >= n.length) return n;
+      [n[idx], n[j]] = [n[j], n[idx]];
+      return n;
+    });
+
+  const kundenHinzu = () => {
+    const namen = neueKunden.split(/\n/).map((x) => x.trim()).filter(Boolean);
+    setDaten((d) => {
+      const vorhanden = new Set(d.kunden.map((k) => k.name.trim().toLowerCase()));
+      const neu = namen.filter((n) => !vorhanden.has(n.toLowerCase())).map((name) => ({ id: uid(), name }));
+      return { ...d, kunden: [...d.kunden, ...neu] };
+    });
+    setNeueKunden("");
+  };
+  const benutzteKunden = new Set(daten.backtage.flatMap((bt) => bt.bestellungen.map((b) => b.kundeId)));
+  const groesse = new Blob([JSON.stringify(daten)]).size;
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex gap-1 p-1 rounded-xl" style={{ backgroundColor: COL.surface, border: `1px solid ${COL.line}` }}>
+        {[["sorten", "🥖 Sorten"], ["kunden", "👥 Kunden"], ["app", "⚙️ App"]].map(([k, l]) => (
+          <button key={k} onClick={() => setBereich(k)} className="flex-1 text-sm py-2 rounded-lg" style={{ backgroundColor: bereich === k ? COL.accent : "transparent", color: bereich === k ? "#fff" : COL.ink }}>{l}</button>
+        ))}
+      </div>
+
+      {bereich === "sorten" && (
+        <>
+          <p className="text-sm" style={{ color: COL.inkMuted }}>
+            Für jede Sorte: welches Rezept aus der Lager-App, wie schwer ein Stück ist (leer = aus dem Rezept) und der Verkaufspreis. „Extra“ ist z.B. eine Füllung oder ein Topping mit eigenem Rezept.
+          </p>
+          {daten.sorten.map((s, idx) => {
+            const rez = findRezept(lager?.recipes || [], s.rezept);
+            const auto = rez ? gProStueck({ gProStueck: "" }, rez) : 0;
+            return (
+              <Card key={s.id} className="!p-3.5" style={{ opacity: s.aktiv ? 1 : 0.6 }}>
+                <div className="flex items-center gap-2 mb-2">
+                  <input style={{ ...inputStyle, width: 90, fontWeight: 600 }} value={s.kurz} onChange={(e) => upd(s.id, { kurz: e.target.value })} aria-label="Kürzel" />
+                  <input style={{ ...inputStyle, flex: 1 }} value={s.name} onChange={(e) => upd(s.id, { name: e.target.value })} aria-label="Name" />
+                  <div className="flex flex-col">
+                    <button onClick={() => move(idx, -1)} className="text-xs px-1" style={{ color: COL.inkMuted }} aria-label="nach oben">▲</button>
+                    <button onClick={() => move(idx, 1)} className="text-xs px-1" style={{ color: COL.inkMuted }} aria-label="nach unten">▼</button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                  <div className="col-span-2">
+                    <Field label="Rezept">
+                      <select style={{ ...inputStyle, borderColor: rez ? COL.line : COL.warn }} value={rez ? rez.name : ""} onChange={(e) => upd(s.id, { rezept: e.target.value })}>
+                        <option value="">– bitte wählen –</option>
+                        {rezepte.map((r) => <option key={r.id} value={r.name}>{r.name}</option>)}
+                      </select>
+                    </Field>
+                  </div>
+                  <Field label="g pro Stück">
+                    <input style={inputStyle} inputMode="decimal" value={s.gProStueck ?? ""} onChange={(e) => upd(s.id, { gProStueck: e.target.value })} placeholder={auto ? `${Math.round(auto)} (Rezept)` : "z.B. 100"} />
+                  </Field>
+                  <Field label="Preis €">
+                    <input style={{ ...inputStyle, borderColor: Number(s.preis) > 0 ? COL.line : COL.amber }} inputMode="decimal" value={s.preis ?? ""} onChange={(e) => upd(s.id, { preis: e.target.value.replace(",", ".") })} />
+                  </Field>
+                  <Field label="Verpackung €">
+                    <input style={inputStyle} inputMode="decimal" value={s.verpackung ?? ""} placeholder="0" onChange={(e) => upd(s.id, { verpackung: e.target.value.replace(",", ".") })} aria-label="Verpackungskosten pro Stück bzw. Packung" />
+                  </Field>
+                </div>
+                {(s.extras || []).map((x, xi) => {
+                  // Wert im Auswahlfeld: "r:Rezeptname" oder "m:Rohstoffname"
+                  const xRez = x.rezept ? findRezept(lager?.recipes || [], x.rezept) : null;
+                  const xMat = x.rohstoff ? findRohstoff(lager?.materials || [], x.rohstoff) : null;
+                  const wert = xRez ? `r:${xRez.name}` : xMat ? `m:${xMat.name}` : "";
+                  const xAuto = xRez ? gProStueck({ gProStueck: "" }, xRez) : 0;
+                  const setzen = (v) => {
+                    const neu = v.startsWith("r:") ? { rezept: v.slice(2), rohstoff: "" } : v.startsWith("m:") ? { rohstoff: v.slice(2), rezept: "" } : { rezept: "", rohstoff: "" };
+                    upd(s.id, { extras: s.extras.map((y, yi) => (yi === xi ? { ...y, ...neu } : y)) });
+                  };
+                  return (
+                  <div key={xi} className="flex items-end gap-2 mt-2">
+                    <div className="flex-1 min-w-0">
+                      <Field label="Extra: Füllung/Topping (Rezept) oder Zugabe (Rohstoff)">
+                        <select style={{ ...inputStyle, borderColor: wert ? COL.line : COL.warn }} value={wert} onChange={(e) => setzen(e.target.value)}>
+                          <option value="">– wählen –</option>
+                          <optgroup label="Rezepte">
+                            {rezepte.map((r) => <option key={r.id} value={`r:${r.name}`}>{r.name}</option>)}
+                          </optgroup>
+                          <optgroup label="Rohstoffe (Zugabe)">
+                            {[...(lager?.materials || [])].filter((m) => !m.vorteig).sort((a, b) => a.name.localeCompare(b.name, "de")).map((m) => <option key={m.id} value={`m:${m.name}`}>{m.name}</option>)}
+                          </optgroup>
+                        </select>
+                      </Field>
+                    </div>
+                    <div style={{ width: 90 }}>
+                      <Field label="g/Stück">
+                        <input style={inputStyle} inputMode="decimal" value={x.g ?? ""} placeholder={xAuto ? `${fmtNum(xAuto)} (Rezept)` : ""} onChange={(e) => upd(s.id, { extras: s.extras.map((y, yi) => (yi === xi ? { ...y, g: e.target.value } : y)) })} />
+                      </Field>
+                    </div>
+                    <button className="pb-3" style={{ color: COL.warn }} onClick={() => upd(s.id, { extras: s.extras.filter((_, yi) => yi !== xi) })} aria-label="Extra entfernen"><IcX size={16} /></button>
+                  </div>
+                  );
+                })}
+                {Object.entries(s.sonderpreise || {}).map(([kid, sp]) => (
+                  <div key={kid} className="flex items-end gap-2 mt-2">
+                    <div className="flex-1 min-w-0">
+                      <Field label="Sonderpreis für Kunde">
+                        <select
+                          style={{ ...inputStyle, borderColor: daten.kunden.some((k) => k.id === kid) ? COL.line : COL.warn }}
+                          value={kid}
+                          onChange={(e) => {
+                            const neu = { ...s.sonderpreise };
+                            delete neu[kid];
+                            upd(s.id, { sonderpreise: { ...neu, [e.target.value]: sp } });
+                          }}
+                        >
+                          {!daten.kunden.some((k) => k.id === kid) && <option value={kid}>– Kunde gelöscht –</option>}
+                          {[...daten.kunden]
+                            .filter((k) => k.id === kid || !(k.id in s.sonderpreise))
+                            .sort((a, b) => a.name.localeCompare(b.name, "de"))
+                            .map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
+                        </select>
+                      </Field>
+                    </div>
+                    <div style={{ width: 90 }}>
+                      <Field label="Preis €">
+                        <input style={inputStyle} inputMode="decimal" value={sp ?? ""} onChange={(e) => upd(s.id, { sonderpreise: { ...s.sonderpreise, [kid]: e.target.value.replace(",", ".") } })} />
+                      </Field>
+                    </div>
+                    <button
+                      className="pb-3"
+                      style={{ color: COL.warn }}
+                      onClick={() => {
+                        const neu = { ...s.sonderpreise };
+                        delete neu[kid];
+                        upd(s.id, { sonderpreise: neu });
+                      }}
+                      aria-label="Sonderpreis entfernen"
+                    >
+                      <IcX size={16} />
+                    </button>
+                  </div>
+                ))}
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3 text-sm">
+                  <label className="flex items-center gap-1.5"><input type="checkbox" checked={s.aktiv} onChange={(e) => upd(s.id, { aktiv: e.target.checked })} /> aktiv</label>
+                  <label className="flex items-center gap-1.5"><input type="checkbox" checked={!!s.halbe} onChange={(e) => upd(s.id, { halbe: e.target.checked })} /> halbe möglich</label>
+                  <button style={{ color: COL.accent }} onClick={() => upd(s.id, { extras: [...(s.extras || []), { rezept: "", g: "" }] })}>+ Extra</button>
+                  {daten.kunden.some((k) => !(k.id in (s.sonderpreise || {}))) && (
+                    <button
+                      style={{ color: COL.accent }}
+                      onClick={() => {
+                        const frei = [...daten.kunden].sort((a, b) => a.name.localeCompare(b.name, "de")).find((k) => !(k.id in (s.sonderpreise || {})));
+                        upd(s.id, { sonderpreise: { ...(s.sonderpreise || {}), [frei.id]: s.preis ?? "" } });
+                      }}
+                    >
+                      + Sonderpreis
+                    </button>
+                  )}
+                  <button style={{ color: COL.warn }} className="ml-auto" onClick={() => window.confirm(`Sorte „${s.kurz}“ löschen?`) && setSorten((ss) => ss.filter((x) => x.id !== s.id))}>Löschen</button>
+                </div>
+                <div className="mt-2">
+                  <Field label="Andere Schreibweisen für WhatsApp (mit Komma)">
+                    <input style={{ ...inputStyle, fontSize: 13 }} value={s.aliases || ""} onChange={(e) => upd(s.id, { aliases: e.target.value })} />
+                  </Field>
+                </div>
+              </Card>
+            );
+          })}
+          <Btn onClick={() => setSorten((ss) => [...ss, { id: uid(), kurz: "Neu", name: "Neue Sorte", rezept: "", gProStueck: "", preis: 0, extras: [], aktiv: true, halbe: false, aliases: "" }])}>
+            <IcPlus size={16} /> Neue Sorte
+          </Btn>
+        </>
+      )}
+
+      {bereich === "kunden" && (
+        <>
+          <Card>
+            <H2>Kunden hinzufügen</H2>
+            <textarea style={{ ...inputStyle, width: "100%", minHeight: 90 }} value={neueKunden} onChange={(e) => setNeueKunden(e.target.value)} placeholder={"Ein Name pro Zeile – du kannst auch deine ganze Liste aus Excel hineinkopieren."} />
+            <div className="mt-2"><Btn primary onClick={kundenHinzu} disabled={!neueKunden.trim()}>Hinzufügen</Btn></div>
+          </Card>
+          <Card>
+            <H2>{daten.kunden.length} Kunden</H2>
+            <div className="flex flex-col">
+              {[...daten.kunden].sort((a, b) => a.name.localeCompare(b.name, "de")).map((k, i) => (
+                <div key={k.id} className="flex items-center gap-2 py-1.5" style={{ borderTop: i ? `1px solid ${COL.line}` : "none" }}>
+                  <input style={{ ...inputStyle, flex: 1, padding: "6px 9px", fontSize: 14 }} value={k.name} onChange={(e) => setDaten((d) => ({ ...d, kunden: d.kunden.map((x) => (x.id === k.id ? { ...x, name: e.target.value } : x)) }))} />
+                  <button
+                    style={{ color: benutzteKunden.has(k.id) ? COL.line : COL.warn }}
+                    disabled={benutzteKunden.has(k.id)}
+                    title={benutzteKunden.has(k.id) ? "Hat Bestellungen – kann nicht gelöscht werden" : "Löschen"}
+                    onClick={() => window.confirm(`${k.name} löschen?`) && setDaten((d) => ({ ...d, kunden: d.kunden.filter((x) => x.id !== k.id) }))}
+                  >
+                    <IcTrash size={15} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </>
+      )}
+
+      {bereich === "app" && (
+        <Card>
+          <div className="flex flex-col gap-3 text-sm">
+            <div className="rounded-xl p-3" style={{ backgroundColor: COL.bg }}>
+              <div className="font-semibold mb-1">📱💻 Abgleich Handy & Laptop</div>
+              <div>Bestell-Speicher: <b style={{ fontFamily: "'IBM Plex Mono', monospace" }}>…{String(config.bestellBin).slice(-6)}</b></div>
+              <div>Lager-Speicher: <b style={{ fontFamily: "'IBM Plex Mono', monospace" }}>…{String(config.lagerBin).slice(-6)}</b> (muss gleich sein wie in der Lager-App)</div>
+              <div>Dieses Gerät: {GERAET.art}</div>
+              {letzterStand && <div>Zuletzt gespeichert: {fmtStand(letzterStand)}</div>}
+              <div className="text-xs mt-1" style={{ color: COL.inkMuted }}>Auf beiden Geräten müssen dieselben Nummern stehen. Sonst am richtigen Gerät „Neues Gerät einrichten“ öffnen und den QR-Code mit dem anderen scannen.</div>
+              <div className="flex flex-wrap gap-2 mt-2">
+                <Btn small primary onClick={onAbgleichen}>🔄 Jetzt abgleichen</Btn>
+                <Btn small onClick={onSpeicherPruefen}>🔍 Nach zweitem Speicher suchen</Btn>
+              </div>
+            </div>
+            <div>📖 Aus der Lager-App geladen: <b>{lager?.recipes?.length || 0} Rezepte</b>, <b>{lager?.materials?.length || 0} Rohstoffe</b></div>
+            <Btn onClick={onReloadLager}>🔄 Rezepte & Lagerstand neu laden</Btn>
+            <div className="rounded-xl p-3" style={{ backgroundColor: COL.bg }}>
+              <div className="font-semibold mb-1">🧮 Herstellungskosten</div>
+              <div className="text-xs mb-2" style={{ color: COL.inkMuted }}>
+                Strom, Arbeitszeit, Verpackung – als Anteil der Materialkosten (bei dir ca. 80–100 %). Daraus rechnet die App den Gewinn bei Rabatten.
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {[80, 90, 100].map((p) => {
+                  const on = herstellProzentVon(daten) === p;
+                  return (
+                    <button
+                      key={p}
+                      onClick={() => setDaten((d) => ({ ...d, herstellProzent: p }))}
+                      className="text-sm font-semibold px-3 py-1.5 rounded-full"
+                      style={{ backgroundColor: on ? COL.accent : COL.surface, color: on ? "#fff" : COL.ink, border: `1px solid ${on ? COL.accent : COL.line}` }}
+                    >
+                      {p} %
+                    </button>
+                  );
+                })}
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  style={{ ...inputStyle, width: 80 }}
+                  value={daten.herstellProzent ?? HERSTELL_PROZENT_STANDARD}
+                  onChange={(e) => setDaten((d) => ({ ...d, herstellProzent: e.target.value === "" ? "" : Number(e.target.value) }))}
+                  aria-label="Herstellungskosten in Prozent der Materialkosten"
+                />
+                <span className="text-sm">% der Materialkosten</span>
+              </div>
+            </div>
+            <div>💾 Speicher belegt: <b>{fmtNum(groesse / 1024)} kb</b> von 100 kb (die letzten {MAX_BACKTAGE} Backtage werden aufgehoben)</div>
+            <Btn onClick={() => setZeigeLink(!zeigeLink)}>📱 Neues Gerät einrichten</Btn>
+            {zeigeLink && (
+              <div className="flex flex-col items-center gap-2">
+                <QrCode text={makeSetupUrl(config)} size={220} />
+                <input readOnly value={makeSetupUrl(config)} onFocus={(e) => e.target.select()} style={{ ...inputStyle, width: "100%", fontSize: 11, fontFamily: "'IBM Plex Mono', monospace" }} />
+                <p className="text-xs text-center" style={{ color: COL.warn }}>Achtung: Wer diesen Link hat, kann auf deine Daten zugreifen – nur mit eigenen Geräten teilen.</p>
+              </div>
+            )}
+            <a href={LAGER_APP_URL} className="underline" style={{ color: COL.accent }}>→ Zur Lager-App</a>
+            <Btn danger onClick={onDisconnect}>Verbindung auf diesem Gerät trennen</Btn>
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ---------- Abgleich zwischen Handy und Laptop ----------
+// Jedes Gerät merkt sich den zuletzt geladenen/gespeicherten Stand ("Basis"). Hat inzwischen ein anderes
+// Gerät gespeichert, werden beim Speichern beide Änderungen zusammengeführt statt überschrieben.
+const GERAET = (() => {
+  let id = "";
+  try {
+    id = localStorage.getItem("geraet_id") || "";
+    if (!id) {
+      id = Math.random().toString(36).slice(2, 7);
+      localStorage.setItem("geraet_id", id);
+    }
+  } catch (e) {}
+  const art = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) ? "Handy" : "PC";
+  return { id, art };
+})();
+const neuerStand = () => ({ zeit: new Date().toISOString(), geraet: GERAET.id, art: GERAET.art });
+const ohneStand = (rec) => {
+  if (!rec || typeof rec !== "object") return rec;
+  const { _stand, ...rest } = rec;
+  return rest;
+};
+const gleichJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const hatIds = (arr) => Array.isArray(arr) && arr.every((x) => x && typeof x === "object" && x.id != null);
+
+// Drei-Wege-Abgleich: basis = gemeinsamer Ausgangsstand, mein = dieses Gerät, dein = Speicher (anderes Gerät)
+function abgleichen(basis, mein, dein, schluessel) {
+  if (gleichJson(mein, basis)) return dein;
+  if (dein === undefined || gleichJson(dein, basis) || gleichJson(mein, dein)) return mein;
+  // Lagerbestand: Änderungen beider Geräte zusammenrechnen (z.B. zwei Abbuchungen)
+  if (schluessel === "stock" && [basis, mein, dein].every((v) => typeof v === "number")) {
+    return Math.round((dein + (mein - basis)) * 1000) / 1000;
+  }
+  // Listen mit IDs (Rohstoffe, Rezepte, Kunden, Backtage, Bestellungen …): Eintrag für Eintrag
+  if (hatIds(mein) && hatIds(dein)) {
+    const b = new Map((hatIds(basis) ? basis : []).map((x) => [x.id, x]));
+    const m = new Map(mein.map((x) => [x.id, x]));
+    const d = new Map(dein.map((x) => [x.id, x]));
+    const ergebnis = [];
+    dein.forEach((t) => {
+      const bb = b.get(t.id);
+      const mm = m.get(t.id);
+      if (!mm) {
+        if (bb && gleichJson(t, bb)) return; // hier gelöscht, dort unverändert -> weg
+        ergebnis.push(t); // dort neu oder dort geändert -> behalten
+        return;
+      }
+      ergebnis.push(bb ? abgleichen(bb, mm, t) : mm);
+    });
+    mein.forEach((mm) => {
+      if (d.has(mm.id)) return;
+      const bb = b.get(mm.id);
+      if (bb && gleichJson(mm, bb)) return; // dort gelöscht, hier unverändert -> weg
+      ergebnis.push(mm); // hier neu oder hier geändert -> behalten
+    });
+    return ergebnis;
+  }
+  // Objekte: Feld für Feld
+  const istObj = (v) => v && typeof v === "object" && !Array.isArray(v);
+  if (istObj(mein) && istObj(dein)) {
+    const bo = istObj(basis) ? basis : {};
+    const out = {};
+    new Set([...Object.keys(dein), ...Object.keys(mein)]).forEach((k) => {
+      if (!(k in mein) && k in bo) {
+        if (!gleichJson(dein[k], bo[k])) out[k] = dein[k]; // hier gelöscht, dort geändert -> behalten
+        return;
+      }
+      if (!(k in dein) && k in bo) {
+        if (!gleichJson(mein[k], bo[k])) out[k] = mein[k];
+        return;
+      }
+      const v = abgleichen(bo[k], mein[k], dein[k], k);
+      if (v !== undefined) out[k] = v;
+    });
+    return out;
+  }
+  return mein; // beide Geräte haben denselben Wert geändert -> dieses Gerät gewinnt
+}
+
+const fmtStand = (st) => {
+  if (!st || !st.zeit) return "";
+  const d = new Date(st.zeit);
+  const heute = new Date().toDateString() === d.toDateString();
+  const zeit = d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+  const wer = st.geraet === GERAET.id ? "diesem Gerät" : st.art === "Handy" ? "dem Handy" : st.art === "PC" ? "dem Laptop/PC" : "einem anderen Gerät";
+  return `${heute ? "heute" : d.toLocaleDateString("de-DE")} ${zeit} von ${wer}`;
+};
+
+// ---------- Expedit: alle Produkte des Backtags, pro Produkt die Kunden von der größten zur kleinsten Menge ----------
+// Jedes Produkt muss bei jedem Kunden bestätigt werden. Gespeichert wird in der Bestellung: expedit[sorteId] = bestätigte
+// Menge – ändert sich die Menge danach, ist es wieder offen ("Menge geändert – nochmal bestätigen").
+function ExpeditTab({ backtag, sorten, kunden, updateBacktag }) {
+  const [offen, setOffen] = useState({});
+  const kName = (id) => kunden.find((k) => k.id === id)?.name || "(unbekannt)";
+  const produkte = useMemo(() => {
+    const bestellungen = backtag.bestellungen || [];
+    return sorten
+      .map((s) => {
+        const proKunde = new Map();
+        bestellungen.forEach((b) => {
+          const q = Number(b.items?.[s.id]) || 0;
+          if (q <= 0) return;
+          const k = proKunde.get(b.kundeId) || { kundeId: b.kundeId, name: kName(b.kundeId), menge: 0, fertig: true, vorher: false };
+          const bestaetigt = b.expedit?.[s.id];
+          k.menge += q;
+          if (Number(bestaetigt) !== q) {
+            k.fertig = false;
+            if (bestaetigt != null) k.vorher = true; // war bestätigt, Menge hat sich seither geändert
+          }
+          proKunde.set(b.kundeId, k);
+        });
+        const kundenListe = [...proKunde.values()].sort((a, b) => b.menge - a.menge || a.name.localeCompare(b.name, "de"));
+        return {
+          sorte: s,
+          gesamt: kundenListe.reduce((x, k) => x + k.menge, 0),
+          kunden: kundenListe,
+          fertig: kundenListe.filter((k) => k.fertig).length,
+        };
+      })
+      .filter((p) => p.gesamt > 0);
+  }, [backtag, sorten, kunden]);
+
+  // Bestätigen bzw. wieder auf offen setzen – gilt für alle Bestellungen dieses Kunden mit dieser Sorte
+  const setzen = (kundeId, sorteId, fertig) =>
+    updateBacktag((bt) => ({
+      ...bt,
+      bestellungen: bt.bestellungen.map((b) => {
+        const q = Number(b.items?.[sorteId]) || 0;
+        if (b.kundeId !== kundeId || q <= 0) return b;
+        const expedit = { ...(b.expedit || {}) };
+        if (fertig) expedit[sorteId] = q;
+        else delete expedit[sorteId];
+        return { ...b, expedit };
+      }),
+    }));
+
+  if (produkte.length === 0) {
+    return <Card><p className="text-sm text-center py-8" style={{ color: COL.inkMuted }}>📦 Hier erscheinen alle Produkte, sobald Bestellungen eingetragen sind.</p></Card>;
+  }
+  const alleOffen = produkte.every((p) => offen[p.sorte.id]);
+  const alleUmschalten = () => setOffen(alleOffen ? {} : Object.fromEntries(produkte.map((p) => [p.sorte.id, true])));
+  const posten = produkte.reduce((s, p) => s + p.kunden.length, 0);
+  const erledigt = produkte.reduce((s, p) => s + p.fertig, 0);
+  const allesFertig = erledigt === posten;
+  // Was fehlt noch bei wem? (zum Schluss kontrollieren)
+  const fehlt = new Map();
+  produkte.forEach((p) =>
+    p.kunden.filter((k) => !k.fertig).forEach((k) => {
+      const f = fehlt.get(k.kundeId) || { name: k.name, teile: [] };
+      f.teile.push(`${fmtQty(k.menge)}× ${p.sorte.kurz}`);
+      fehlt.set(k.kundeId, f);
+    })
+  );
+  const fehltListe = [...fehlt.values()].sort((a, b) => a.name.localeCompare(b.name, "de"));
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Card>
+        <H2 right={<button onClick={alleUmschalten} className="text-sm shrink-0" style={{ color: COL.accent }}>{alleOffen ? "Alle zu" : "Alle auf"}</button>}>
+          📦 Expedit · {fmtDatum(backtag.datum)}
+        </H2>
+        <div className="mb-3">
+          <div className="flex justify-between text-sm mb-1">
+            <span style={{ color: allesFertig ? COL.ok : COL.ink, fontWeight: 600 }}>{allesFertig ? "✅ Alles eingepackt" : `${erledigt} von ${posten} erledigt`}</span>
+            <span style={{ color: COL.inkMuted }}>{Math.round((erledigt / posten) * 100)} %</span>
+          </div>
+          <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: COL.line }}>
+            <div className="h-full rounded-full" style={{ width: `${(erledigt / posten) * 100}%`, backgroundColor: allesFertig ? COL.ok : COL.accent, transition: "width .2s" }} />
+          </div>
+        </div>
+        <p className="text-xs mb-3" style={{ color: COL.inkMuted }}>Tippe auf ein Produkt – die Kunden stehen von der größten zur kleinsten Menge. Hast du es für einen Kunden fertig, mit ✓ bestätigen.</p>
+        <div className="flex flex-col gap-2">
+          {produkte.map(({ sorte, gesamt, kunden: liste, fertig }) => {
+            const auf = !!offen[sorte.id];
+            const komplett = fertig === liste.length;
+            return (
+              <div key={sorte.id} className="rounded-xl overflow-hidden" style={{ border: `1px solid ${komplett ? COL.ok : auf ? COL.accent : COL.line}` }}>
+                <button
+                  onClick={() => setOffen((o) => ({ ...o, [sorte.id]: !o[sorte.id] }))}
+                  className="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left"
+                  style={{ backgroundColor: komplett ? COL.okSoft : auf ? COL.accentSoft : COL.surface }}
+                  aria-expanded={auf}
+                >
+                  <span className="min-w-0">
+                    <span className="font-semibold">{komplett ? "✅ " : ""}{sorte.kurz}</span>{" "}
+                    <span className="text-xs" style={{ color: COL.inkMuted }}>{sorte.name !== sorte.kurz ? sorte.name : ""}</span>
+                    <span className="block text-xs" style={{ color: komplett ? COL.ok : COL.inkMuted }}>
+                      {komplett ? `fertig · ${liste.length} ${liste.length === 1 ? "Kunde" : "Kunden"}` : `${fertig} von ${liste.length} ${liste.length === 1 ? "Kunde" : "Kunden"} fertig`}
+                    </span>
+                  </span>
+                  <span className="flex items-center gap-2 shrink-0">
+                    <span className="text-xl font-bold" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtQty(gesamt)}</span>
+                    <span style={{ color: COL.inkMuted, transform: auf ? "rotate(180deg)" : "none", transition: "transform .15s" }}>▾</span>
+                  </span>
+                </button>
+                {auf && (
+                  <div>
+                    {liste.map((k, i) => (
+                      <button
+                        key={k.kundeId}
+                        onClick={() => setzen(k.kundeId, sorte.id, !k.fertig)}
+                        className="w-full flex items-center gap-3 px-3 py-2 text-left"
+                        style={{ backgroundColor: k.fertig ? COL.okSoft : i % 2 ? COL.bg : COL.surface, borderTop: `1px solid ${COL.line}` }}
+                        aria-pressed={k.fertig}
+                        aria-label={`${k.name}: ${fmtQty(k.menge)} ${sorte.kurz} ${k.fertig ? "fertig – antippen für offen" : "bestätigen"}`}
+                      >
+                        <span
+                          className="flex items-center justify-center rounded-lg shrink-0 text-lg font-bold"
+                          style={{ width: 34, height: 34, border: `2px solid ${k.fertig ? COL.ok : COL.line}`, backgroundColor: k.fertig ? COL.ok : "#fff", color: "#fff" }}
+                        >
+                          {k.fertig ? "✓" : ""}
+                        </span>
+                        <span className="flex-1 min-w-0">
+                          <span className="block truncate" style={{ color: k.fertig ? COL.inkMuted : COL.ink, textDecoration: k.fertig ? "line-through" : "none" }}>{k.name}</span>
+                          {k.vorher && <span className="block text-xs" style={{ color: COL.amber }}>Menge geändert – nochmal bestätigen</span>}
+                        </span>
+                        <span className="text-lg font-bold shrink-0" style={{ fontFamily: "'IBM Plex Mono', monospace", color: k.fertig ? COL.inkMuted : COL.ink }}>{fmtQty(k.menge)}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
+      {!allesFertig && erledigt > 0 && (
+        <Card>
+          <H2>⏳ Noch nicht fertig</H2>
+          <div className="flex flex-col gap-1.5 text-sm">
+            {fehltListe.map((f) => (
+              <div key={f.name} className="flex justify-between gap-3">
+                <span className="font-medium truncate">{f.name}</span>
+                <span className="text-right" style={{ color: COL.inkMuted }}>{f.teile.join(", ")}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ---------- Haupt-App ----------
+const TABS = [
+  // mobil = kürzere Beschriftung für die untere Leiste am Handy (5 Reiter nebeneinander)
+  { key: "bestellungen", label: "Bestellungen", mobil: "Bestellung", icon: IcList },
+  { key: "backzettel", label: "Backzettel", icon: IcBread },
+  { key: "expedit", label: "Expedit", icon: IcBox },
+  { key: "kassa", label: "Kunden & €", mobil: "Kunden", icon: IcUsers },
+  { key: "einstellungen", label: "Einstellungen", mobil: "Einstell.", icon: IcGear },
+];
+
+function App() {
+  const [config, setConfig] = useState(() => getConfig());
+  const [daten, setDaten] = useState(leereDaten);
+  const [lager, setLager] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState("bestellungen");
+  const [backtagId, setBacktagId] = useState(null);
+  const [sync, setSync] = useState("idle");
+  const [syncFehler, setSyncFehler] = useState("");
+  const [neuDatum, setNeuDatum] = useState(null); // offenes Datumsfeld für neuen Backtag
+  const [druck, setDruck] = useState(null); // "backzettel" | "kundenzettel" | "lieferliste"
+  const loadedRef = useRef(false);
+  const dirtyRef = useRef(false);
+  const skipSaveRef = useRef(false);
+  // Abgleich: zuletzt geladener/gespeicherter Stand im Speicher und wann
+  const basisRef = useRef(null);
+  const basisZeitRef = useRef(0);
+  const saveChainRef = useRef(Promise.resolve());
+  const latestRef = useRef({});
+  latestRef.current = { daten, config };
+  const [letzterStand, setLetzterStand] = useState(null);
+  const [abgleichInfo, setAbgleichInfo] = useState(null);
+  const [ladeFehler, setLadeFehler] = useState("");
+  const [ladeVersuch, setLadeVersuch] = useState(0);
+  const [zweitSpeicher, setZweitSpeicher] = useState(null); // weitere Bestell-Speicher (z.B. vom anderen Gerät)
+  const [speicherInfo, setSpeicherInfo] = useState("");
+
+  const ladeLager = async (c = latestRef.current.config) => {
+    try {
+      const rec = await binRead(c.apiKey, c.lagerBin);
+      setLager({ recipes: rec.recipes || [], materials: rec.materials || [] });
+    } catch (e) {
+      setLager(null);
+    }
+  };
+  // Liest den Bestell-Speicher; liefert den Rohstand (für den Abgleich) und die fertigen Daten (mit Sorten-Updates)
+  const ladeDaten = async (c) => {
+    const rec = await binRead(c.apiKey, c.bestellBin);
+    if (rec.ersetztDurch) return { umziehen: rec.ersetztDurch };
+    const d = { ...leereDaten(), ...rec, sortenUpdates: rec.sortenUpdates || [] };
+    delete d._stand;
+    const fertig = !rec.sorten?.length ? { ...d, sorten: STANDARD_SORTEN, sortenUpdates: SORTEN_UPDATES.map((u) => u.id) } : sortenAktualisieren(d);
+    return { rec, daten: fertig };
+  };
+  const umziehen = (c, neuerBin) => {
+    // Dieser Speicher wurde auf einem anderen Gerät mit dem richtigen zusammengeführt -> dorthin wechseln
+    const neu = { ...c, bestellBin: neuerBin };
+    saveConfig(neu);
+    setSpeicherInfo("Dieses Gerät verwendet jetzt denselben Bestell-Speicher wie dein anderes Gerät.");
+    setConfig(neu);
+  };
+
+  useEffect(() => {
+    if (!config) { setLoading(false); return; }
+    let cancelled = false;
+    setLoading(true);
+    setLadeFehler("");
+    (async () => {
+      try {
+        const [res] = await Promise.all([ladeDaten(config), ladeLager(config)]);
+        if (cancelled) return;
+        if (res.umziehen) return umziehen(config, res.umziehen);
+        basisRef.current = bestellNormalisieren(res.rec);
+        basisZeitRef.current = Date.now();
+        setLetzterStand(res.rec._stand || null);
+        // Nur speichern, wenn beim Laden etwas angepasst wurde (Sorten-Update) – spart Zugriffe
+        skipSaveRef.current = gleichJson(bestellNormalisieren(res.daten), basisRef.current);
+        setDaten(res.daten);
+        const d = res.daten;
+        const kommend = [...d.backtage].sort((a, b) => a.datum.localeCompare(b.datum)).find((b) => b.datum >= isoHeute());
+        setBacktagId((kommend || d.backtage[d.backtage.length - 1])?.id || null);
+        loadedRef.current = true;
+        setLoading(false);
+        speicherPruefen(config);
+      } catch (e) {
+        // Nicht mit leeren Daten weiterarbeiten – sonst würden die echten Daten beim Speichern überschrieben
+        if (cancelled) return;
+        loadedRef.current = false;
+        setLadeFehler(e.message || "Speicher nicht erreichbar");
+        setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [config, ladeVersuch]);
+
+  // Speichern mit Abgleich: vor JEDEM Speichern nachsehen, ob ein anderes Gerät inzwischen gespeichert hat –
+  // dann beide Änderungen zusammenführen statt zu überschreiben (kostet einen Lesezugriff pro Speichern).
+  const speichern = async (mein) => {
+    const c = latestRef.current.config;
+    let ziel = mein;
+    const cloud = await binRead(c.apiKey, c.bestellBin);
+    if (cloud.ersetztDurch) {
+      umziehen(c, cloud.ersetztDurch);
+      throw new Error("Speicher wurde zusammengeführt – deine letzte Änderung bitte nochmal eintragen");
+    }
+    const dein = bestellNormalisieren(cloud);
+    if (!gleichJson(dein, basisRef.current)) {
+      ziel = abgleichen(basisRef.current, mein, dein);
+      setAbgleichInfo(cloud._stand || { zeit: new Date().toISOString() });
+    }
+    const stand = neuerStand();
+    await binWrite(c.apiKey, c.bestellBin, { ...ziel, _stand: stand });
+    basisRef.current = ziel;
+    basisZeitRef.current = Date.now();
+    setLetzterStand(stand);
+    if (!gleichJson(ziel, mein)) {
+      const jetzt = bestellNormalisieren(latestRef.current.daten);
+      skipSaveRef.current = true;
+      setDaten(gleichJson(jetzt, mein) ? ziel : abgleichen(mein, jetzt, ziel));
+    }
+    dirtyRef.current = !gleichJson(bestellNormalisieren(latestRef.current.daten), ziel);
+  };
+  const jetztSpeichern = () => {
+    const mein = bestellNormalisieren(latestRef.current.daten);
+    saveChainRef.current = saveChainRef.current
+      .then(() => speichern(mein))
+      .then(() => {
+        setSync("saved");
+        setSyncFehler("");
+      })
+      .catch((e) => {
+        setSync("error");
+        setSyncFehler(e.message);
+      });
+    return saveChainRef.current;
+  };
+
+  // Automatisch speichern
+  useEffect(() => {
+    if (!config || !loadedRef.current) return;
+    if (skipSaveRef.current) {
+      skipSaveRef.current = false;
+      return;
+    }
+    dirtyRef.current = true;
+    setSync("saving");
+    const t = setTimeout(jetztSpeichern, 900);
+    return () => clearTimeout(t);
+  }, [daten]);
+
+  // Neuesten Stand holen (beim Zurückkehren in die App oder per Knopf) – nur wenn hier nichts ungespeichert ist
+  const holen = async () => {
+    const c = latestRef.current.config;
+    if (!c || dirtyRef.current || !loadedRef.current) return;
+    try {
+      const [res] = await Promise.all([ladeDaten(c), ladeLager(c)]);
+      if (res.umziehen) return umziehen(c, res.umziehen);
+      const dein = bestellNormalisieren(res.rec);
+      setLetzterStand(res.rec._stand || null);
+      if (!gleichJson(dein, basisRef.current) || !gleichJson(bestellNormalisieren(latestRef.current.daten), dein)) {
+        skipSaveRef.current = gleichJson(bestellNormalisieren(res.daten), dein);
+        setDaten(res.daten);
+      }
+      basisRef.current = dein;
+      basisZeitRef.current = Date.now();
+      setSync("saved");
+    } catch (e) {}
+  };
+
+  useEffect(() => {
+    let verstecktSeit = 0;
+    const onVis = () => {
+      if (document.visibilityState === "hidden") {
+        verstecktSeit = Date.now();
+        ausstehendSpeichern();
+      } else if (verstecktSeit && Date.now() - verstecktSeit > 20 * 1000) {
+        holen();
+      }
+    };
+    // Nur wenn noch eine Änderung auf dem Weg ist: sofort abschicken
+    const ausstehendSpeichern = () => {
+      const { config: c, daten: d } = latestRef.current;
+      if (!c || !loadedRef.current || !dirtyRef.current) return;
+      try {
+        fetch(`https://api.jsonbin.io/v3/b/${c.bestellBin}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", "X-Master-Key": c.apiKey },
+          body: JSON.stringify({ ...bestellNormalisieren(d), _stand: neuerStand() }),
+          keepalive: true,
+        });
+      } catch (e) {}
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("pagehide", ausstehendSpeichern);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("pagehide", ausstehendSpeichern);
+    };
+  }, []);
+
+  // Einmal am Tag nachsehen, ob es noch einen zweiten Bestell-Speicher gibt (z.B. am Handy extra eingerichtet)
+  const speicherPruefen = async (c, zwingend = false) => {
+    try {
+      const heute = isoHeute() + c.bestellBin;
+      if (!zwingend && localStorage.getItem("speicher_check") === heute) return;
+      localStorage.setItem("speicher_check", heute);
+      const andere = await andereBestellSpeicher(c);
+      setZweitSpeicher(andere.length ? andere : null);
+      if (zwingend && !andere.length) setSpeicherInfo("Alles in Ordnung – es gibt nur diesen einen Bestell-Speicher.");
+    } catch (e) {}
+  };
+  const zusammenfuehren = async () => {
+    const c = latestRef.current.config;
+    let ergebnis = bestellNormalisieren(latestRef.current.daten);
+    const summe = { kunden: 0, bestellungen: 0 };
+    zweitSpeicher.forEach((z) => {
+      const r = bestellSpeicherZusammenfuehren(ergebnis, z.rec);
+      ergebnis = r.daten;
+      summe.kunden += r.neueKunden;
+      summe.bestellungen += r.neueBestellungen;
+    });
+    try {
+      setSync("saving");
+      const stand = neuerStand();
+      await binWrite(c.apiKey, c.bestellBin, { ...ergebnis, _stand: stand });
+      basisRef.current = ergebnis;
+      basisZeitRef.current = Date.now();
+      setLetzterStand(stand);
+      skipSaveRef.current = true;
+      setDaten(ergebnis);
+      // Den anderen Speicher als "umgezogen" markieren – das andere Gerät stellt sich dann selbst um. Daten bleiben dort als Sicherung.
+      for (const z of zweitSpeicher) {
+        await binWrite(c.apiKey, z.id, { ...z.rec, ersetztDurch: c.bestellBin, ersetztAm: new Date().toISOString() });
+      }
+      setZweitSpeicher(null);
+      setSync("saved");
+      setSpeicherInfo(`Zusammengeführt: ${summe.kunden} Kunden und ${summe.bestellungen} Bestellungen übernommen. Dein anderes Gerät stellt sich beim nächsten Öffnen automatisch auf diesen Speicher um.`);
+    } catch (e) {
+      setSync("error");
+      setSyncFehler(e.message);
+    }
+  };
+
+  if (!config) return <SetupScreen onReady={() => setConfig(getConfig())} />;
+  if (loading) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4" style={{ backgroundColor: COL.bg, fontFamily: "'IBM Plex Sans', sans-serif", color: COL.inkMuted }}>
+        <div style={{ fontSize: 56, animation: "rise 1.6s ease-in-out infinite" }}>🧾</div>
+        <Brand small />
+        <div className="text-sm">Bestellungen werden geholt …</div>
+      </div>
+    );
+  }
+  if (ladeFehler) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-6 text-center" style={{ backgroundColor: COL.bg, fontFamily: "'IBM Plex Sans', sans-serif", color: COL.ink }}>
+        <Brand small />
+        <div className="text-4xl">📡</div>
+        <div className="font-semibold">Deine Bestellungen konnten nicht geladen werden.</div>
+        <div className="text-sm max-w-sm" style={{ color: COL.inkMuted }}>
+          Bitte Internetverbindung prüfen. Damit nichts überschrieben wird, arbeitet die App erst weiter, wenn deine Daten da sind.
+          <br />
+          <span className="text-xs">({ladeFehler})</span>
+        </div>
+        <Btn primary onClick={() => setLadeVersuch((v) => v + 1)}>Nochmal versuchen</Btn>
+      </div>
+    );
+  }
+
+  const backtage = [...daten.backtage].sort((a, b) => a.datum.localeCompare(b.datum));
+  const backtag = daten.backtage.find((b) => b.id === backtagId) || null;
+
+  const neuerBacktag = () => {
+    const letzter = backtage[backtage.length - 1];
+    const vorschlag = letzter && letzter.datum >= isoHeute() ? plusTage(letzter.datum, 7) : isoHeute();
+    setNeuDatum(vorschlag);
+  };
+  const backtagAnlegen = (datum) => {
+    setNeuDatum(null);
+    if (!datum || !/^\d{4}-\d{2}-\d{2}$/.test(datum)) return;
+    const vorhanden = daten.backtage.find((b) => b.datum === datum);
+    if (vorhanden) { setBacktagId(vorhanden.id); return; }
+    const bt = { id: uid(), datum, bestellungen: [], lagerUebergeben: null };
+    setDaten((d) => ({ ...d, backtage: [...d.backtage, bt] }));
+    setBacktagId(bt.id);
+    setTab("bestellungen");
+  };
+  const updateBacktag = (fn) => setDaten((d) => ({ ...d, backtage: d.backtage.map((b) => (b.id === backtagId ? fn(b) : b)) }));
+  const addKunde = (name) => {
+    const k = { id: uid(), name };
+    setDaten((d) => ({ ...d, kunden: [...d.kunden, k] }));
+    return k;
+  };
+  const letzteBestellung = (kundeId) => {
+    const frueher = [...daten.backtage].filter((b) => b.id !== backtagId).sort((a, b) => b.datum.localeCompare(a.datum));
+    for (const bt of frueher) {
+      const b = bt.bestellungen.find((x) => x.kundeId === kundeId);
+      if (b) return b;
+    }
+    return null;
+  };
+
+  const uebergeben = (bz) => {
+    const payload = {
+      id: `bestellapp-${backtag.id}`,
+      label: `Backzettel ${fmtDatum(backtag.datum)} (Bestell-App)`,
+      items: bz.rohstoffe.map((r) => ({ materialId: r.materialId, needed: Math.round(r.menge * 10) / 10, name: r.mat.name })),
+    };
+    if (backtag.lagerUebergeben && !window.confirm("Dieser Backzettel wurde schon übergeben. Die Lager-App ersetzt dann den alten Abzug durch den neuen. Weiter?")) return;
+    updateBacktag((bt) => ({ ...bt, lagerUebergeben: new Date().toISOString() }));
+    const url = `${LAGER_APP_URL}#backzettel=${encodeURIComponent(JSON.stringify(payload))}`;
+    // Erst wechseln, wenn gespeichert ist (spätestens nach 5 Sekunden)
+    setTimeout(() => {
+      Promise.race([jetztSpeichern(), new Promise((r) => setTimeout(r, 5000))]).finally(() => (window.location.href = url));
+    }, 50);
+  };
+
+  const disconnect = () => {
+    if (!window.confirm("Verbindung auf diesem Gerät trennen? Deine Daten bleiben online erhalten.")) return;
+    localStorage.removeItem("bestellapp_config");
+    window.location.reload();
+  };
+
+  const offen = backtag ? backtag.bestellungen.filter((b) => !b.bezahlt).length : 0;
+
+  return (
+    <>
+    {druck && backtag && (
+      <DruckAnsicht art={druck} setArt={setDruck} backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} lager={lager} onClose={() => setDruck(null)} />
+    )}
+    <div className={`min-h-screen w-full ${druck ? "screen-only" : ""}`} style={{ backgroundColor: COL.bg, fontFamily: "'IBM Plex Sans', sans-serif", color: COL.ink }}>
+      <div className="max-w-3xl mx-auto px-4 pt-4 pb-28 sm:pb-10">
+        <header className="mb-4 no-print">
+          <div className="relative rounded-3xl px-5 py-4" style={{ background: `radial-gradient(circle at 85% 20%, rgba(232,182,76,0.28), transparent 45%), linear-gradient(135deg, ${COL.crust} 0%, #5A3A24 100%)`, boxShadow: "0 10px 30px rgba(59,42,30,0.25)" }}>
+            <div className="flex items-center justify-between gap-2">
+              <Brand light small />
+              <span className="text-xs px-2.5 py-1 rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.1)", color: sync === "error" ? "#FFD2C2" : "rgba(255,255,255,0.75)" }} title={syncFehler}>
+                {sync === "saving" ? "speichert …" : sync === "saved" ? "✓ gespeichert" : sync === "error" ? "⚠ nicht gespeichert" : "bereit"}
+              </span>
+            </div>
+            <div className="mt-3 text-white text-lg" style={{ fontFamily: "'Fraunces', serif", fontWeight: 600 }}>Bestellungen 🧾</div>
+            <div className="flex items-center gap-2 mt-2">
+              <select
+                value={backtagId || ""}
+                onChange={(e) => setBacktagId(e.target.value)}
+                className="flex-1"
+                style={{ ...inputStyle, backgroundColor: "rgba(255,255,255,0.12)", color: "#fff", border: "1px solid rgba(255,255,255,0.25)", fontWeight: 600 }}
+              >
+                {!backtag && <option value="" style={{ color: COL.ink }}>– Backtag wählen –</option>}
+                {backtage.map((b) => (
+                  <option key={b.id} value={b.id} style={{ color: COL.ink }}>
+                    🗓 {fmtDatum(b.datum)} · {b.bestellungen.length} Best.
+                  </option>
+                ))}
+              </select>
+              <button onClick={neuerBacktag} className="text-sm font-semibold px-3 py-2.5 rounded-xl whitespace-nowrap" style={{ backgroundColor: COL.wheat, color: COL.crust }}>+ Backtag</button>
+            </div>
+            {neuDatum !== null && (
+              <div className="flex flex-wrap items-center gap-2 mt-2 p-2 rounded-xl" style={{ backgroundColor: "rgba(255,255,255,0.1)", animation: "fadeIn .2s ease" }}>
+                <span className="text-sm text-white">Neuer Backtag am</span>
+                <input type="date" value={neuDatum} onChange={(e) => setNeuDatum(e.target.value)} style={{ ...inputStyle, padding: "6px 8px" }} aria-label="Datum des Backtags" />
+                <button onClick={() => backtagAnlegen(neuDatum)} className="text-sm font-semibold px-3 py-2 rounded-xl" style={{ backgroundColor: COL.wheat, color: COL.crust }}>Anlegen</button>
+                <button onClick={() => setNeuDatum(null)} className="text-sm px-2 py-2" style={{ color: "rgba(255,255,255,0.8)" }}>Abbrechen</button>
+              </div>
+            )}
+          </div>
+        </header>
+
+        {sync === "error" && syncFehler && (
+          <div className="text-sm px-4 py-3 rounded-2xl mb-4 no-print" style={{ backgroundColor: COL.warnSoft, color: COL.warn }}>⚠️ Speichern fehlgeschlagen: {syncFehler}</div>
+        )}
+
+        {zweitSpeicher && (
+          <div className="text-sm px-4 py-3 rounded-2xl mb-4 no-print" style={{ backgroundColor: COL.amberSoft, color: COL.amber, border: `1px solid ${COL.wheat}` }}>
+            <div className="font-semibold mb-1">📱💻 Es gibt noch einen zweiten Bestell-Speicher</div>
+            <div className="mb-2">
+              Vermutlich wurde die Bestell-App auf deinem anderen Gerät extra eingerichtet – darum sind Handy und Laptop nicht gleich.
+              {zweitSpeicher.map((z) => (
+                <div key={z.id} className="text-xs mt-1">
+                  Speicher …{z.id.slice(-6)}: {z.kunden} Kunden, {z.bestellungen} Bestellungen{z.stand ? `, zuletzt ${fmtStand(z.stand)}` : ""}
+                </div>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Btn small primary onClick={zusammenfuehren}>Zusammenführen</Btn>
+              <Btn small onClick={() => setZweitSpeicher(null)}>Später</Btn>
+            </div>
+            <div className="text-xs mt-2">Alle Kunden und Bestellungen kommen in diesen Speicher. Das andere Gerät stellt sich danach automatisch um. Nichts wird gelöscht.</div>
+          </div>
+        )}
+        {speicherInfo && (
+          <div className="flex items-start gap-2 text-sm px-4 py-3 rounded-2xl mb-4 no-print" style={{ backgroundColor: COL.okSoft, color: COL.ok }}>
+            <span className="flex-1">✅ {speicherInfo}</span>
+            <button onClick={() => setSpeicherInfo("")} aria-label="Schließen"><IcX size={16} /></button>
+          </div>
+        )}
+        {abgleichInfo && (
+          <div className="flex items-start gap-2 text-sm px-4 py-3 rounded-2xl mb-4 no-print" style={{ backgroundColor: COL.amberSoft, color: COL.amber }}>
+            <span className="flex-1">🔄 Inzwischen wurde auf einem anderen Gerät gespeichert ({fmtStand(abgleichInfo)}). Beide Änderungen wurden zusammengeführt.</span>
+            <button onClick={() => setAbgleichInfo(null)} aria-label="Schließen"><IcX size={16} /></button>
+          </div>
+        )}
+
+        <nav className="hidden sm:flex gap-1 mb-4 p-1 rounded-2xl w-fit no-print" style={{ backgroundColor: COL.surface, border: `1px solid ${COL.line}` }}>
+          {TABS.map((t) => {
+            const I = t.icon;
+            const on = tab === t.key;
+            return (
+              <button key={t.key} onClick={() => setTab(t.key)} className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-xl" style={{ backgroundColor: on ? COL.accent : "transparent", color: on ? "#fff" : COL.inkMuted }}>
+                <I size={16} /> {t.label}
+              </button>
+            );
+          })}
+        </nav>
+
+        {tab === "einstellungen" ? (
+          <EinstellungenTab
+            daten={daten}
+            setDaten={setDaten}
+            lager={lager}
+            config={config}
+            onReloadLager={() => ladeLager()}
+            onDisconnect={disconnect}
+            letzterStand={letzterStand}
+            onAbgleichen={holen}
+            onSpeicherPruefen={() => speicherPruefen(config, true)}
+          />
+        ) : !backtag ? (
+          <Card>
+            <div className="text-center py-8">
+              <div className="text-4xl mb-2">🗓</div>
+              <p className="text-sm mb-4" style={{ color: COL.inkMuted }}>Leg zuerst einen Backtag an – dann kannst du Bestellungen eintragen.</p>
+              <Btn primary onClick={neuerBacktag}><IcPlus size={16} /> Backtag anlegen</Btn>
+            </div>
+          </Card>
+        ) : tab === "bestellungen" ? (
+          <BestellungenTab backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} lager={lager} herstellProzent={herstellProzentVon(daten)} updateBacktag={updateBacktag} addKunde={addKunde} letzteBestellung={letzteBestellung} />
+        ) : tab === "backzettel" ? (
+          <BackzettelTab backtag={backtag} sorten={daten.sorten} lager={lager} onUebergeben={uebergeben} onReloadLager={() => ladeLager()} onDrucken={setDruck} />
+        ) : tab === "expedit" ? (
+          <ExpeditTab backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} updateBacktag={updateBacktag} />
+        ) : (
+          <KassaTab backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} lager={lager} herstellProzent={herstellProzentVon(daten)} updateBacktag={updateBacktag} onDrucken={setDruck} />
+        )}
+
+        <nav className="sm:hidden bottom-nav no-print fixed bottom-0 left-0 right-0 z-20 flex justify-around px-2 pt-2" style={{ backgroundColor: "rgba(255,255,255,0.95)", backdropFilter: "blur(10px)", borderTop: `1px solid ${COL.line}` }}>
+          {TABS.map((t) => {
+            const I = t.icon;
+            const on = tab === t.key;
+            return (
+              <button key={t.key} onClick={() => { setTab(t.key); window.scrollTo({ top: 0 }); }} className="relative flex flex-col items-center gap-0.5 px-0.5 py-1 flex-1 min-w-0" style={{ color: on ? COL.accent : COL.inkMuted }}>
+                <span className="flex items-center justify-center rounded-full" style={{ width: 44, height: 28, backgroundColor: on ? COL.accentSoft : "transparent" }}>
+                  <I size={19} strokeWidth={on ? 2.4 : 2} />
+                </span>
+                <span className="text-[11px] w-full text-center truncate" style={{ fontWeight: on ? 600 : 500 }}>{t.mobil || t.label}</span>
+                {t.key === "kassa" && offen > 0 && (
+                  <span className="absolute top-0 right-1/4 text-[10px] font-bold rounded-full px-1.5" style={{ backgroundColor: COL.accent, color: "#fff" }}>{offen}</span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+      </div>
+    </div>
+    </>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+document.getElementById("root").dataset.rendered = "1";
+root.render(<App />);
+</script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('./sw.js').catch(function () {});
+    });
+  }
+</script>
+</body>
+</html>
