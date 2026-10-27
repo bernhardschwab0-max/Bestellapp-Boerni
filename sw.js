@@ -1,8 +1,9 @@
-const CACHE_NAME = 'bestellapp-v17';
+const CACHE_NAME = 'bestellapp-v18';
 
 const APP_SHELL = [
   './',
   './index.html',
+  './zugang.js',
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
@@ -38,7 +39,8 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+      // nur eigene alte Caches löschen – Lager- und Rezept-App liegen auf derselben Adresse
+      Promise.all(keys.filter((k) => k.startsWith('bestellapp-') && k !== CACHE_NAME).map((k) => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
 });
@@ -66,6 +68,12 @@ self.addEventListener('fetch', (event) => {
         .then(speichern)
         .catch(() => caches.match(req).then((c) => c || caches.match('./index.html')))
     );
+    return;
+  }
+
+  // Eigene Programmteile (zugang.js): auch zuerst aus dem Netz, damit sie zur Seite passen
+  if (new URL(req.url).origin === self.location.origin && req.destination === 'script') {
+    event.respondWith(fetch(req).then(speichern).catch(() => caches.match(req).then((c) => c || Response.error())));
     return;
   }
 

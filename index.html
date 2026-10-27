@@ -47,6 +47,7 @@
 <script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
 <script crossorigin="anonymous" integrity="sha384-mZT2gIty7ZDdOGkxfP6joZcYdMW1Jvj9dRlfpTmaJAKKXTqzygtB22k7FLe+KZC1" src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script src="./zugang.js"></script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Zilla+Slab:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 <style>
   body { margin: 0; background: #FAF3E7; }
@@ -332,53 +333,24 @@ const leereDaten = () => ({ version: 1, sorten: STANDARD_SORTEN, sortenUpdates: 
 
 // ---------- Speicher (jsonbin.io) ----------
 // Bestell-Daten liegen in einem eigenen Speicher. Rezepte & Rohstoffe werden aus dem Speicher der Lager-App nur GELESEN.
-function parseSetup(text) {
-  const t = (text || "").trim();
-  const m = t.match(/#setup=([^\s]+)/);
-  if (!m) return null;
-  try {
-    const parts = atob(decodeURIComponent(m[1])).split("|");
-    if (parts.length >= 2 && parts[0] && parts[1]) return { apiKey: parts[0], lagerBin: parts[1], bestellBin: parts[2] || "" };
-  } catch (e) {}
-  return null;
-}
+// Schlüssel und Anmeldung (Chef / Mitarbeiter) regelt zugang.js – der Generalschlüssel liegt nie im Klartext auf dem Gerät.
 function getConfig() {
-  try {
-    if (window.location.hash.startsWith("#setup=")) {
-      const c = parseSetup(window.location.hash);
-      let vorher = null;
-      try { vorher = JSON.parse(localStorage.getItem("bestellapp_config") || "null"); } catch (e) {}
-      // Schutz: ein fremder Link darf die App nicht unbemerkt auf einen anderen Speicher umstellen
-      if (
-        c && c.bestellBin &&
-        (!vorher || vorher.bestellBin === c.bestellBin ||
-          window.confirm("Achtung: Dieser Link verbindet die App mit einem ANDEREN Online-Speicher.\n\nNur bestätigen, wenn der Link von deinem eigenen Gerät stammt. Fortfahren?"))
-      ) saveConfig(c);
-      window.history.replaceState(null, "", window.location.pathname + window.location.search);
-    }
-    const raw = localStorage.getItem("bestellapp_config");
-    if (raw) {
-      const c = JSON.parse(raw);
-      if (c.apiKey && c.lagerBin && c.bestellBin) return c;
-    }
-  } catch (e) {}
-  return null;
+  const g = Zugang.geraet();
+  return g.lagerBin && g.bestellBin ? { apiKey: "zugang", lagerBin: g.lagerBin, bestellBin: g.bestellBin } : null;
 }
 function saveConfig(c) {
-  localStorage.setItem("bestellapp_config", JSON.stringify({ apiKey: c.apiKey, lagerBin: c.lagerBin, bestellBin: c.bestellBin }));
-}
-function makeSetupUrl(c) {
-  return `${window.location.origin}${window.location.pathname}#setup=${encodeURIComponent(btoa(`${c.apiKey}|${c.lagerBin}|${c.bestellBin}`))}`;
+  Zugang.speicherSetzen({ lagerBin: c.lagerBin, bestellBin: c.bestellBin });
 }
 async function binRead(apiKey, binId) {
-  const res = await fetch(`https://api.jsonbin.io/v3/b/${binId}/latest`, { headers: { "X-Master-Key": apiKey } });
+  const res = await fetch(`https://api.jsonbin.io/v3/b/${binId}/latest`, { headers: Zugang.kopf() });
   if (!res.ok) throw new Error(`Laden fehlgeschlagen (${res.status})`);
   return (await res.json()).record;
 }
 async function binWrite(apiKey, binId, data) {
   const res = await fetch(`https://api.jsonbin.io/v3/b/${binId}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json", "X-Master-Key": apiKey },
+    // Speichert ein Mitarbeiter (Expedit), hebt jsonbin die Version auf – so lässt sich alles wiederherstellen
+    headers: { ...Zugang.kopf(true), ...(Zugang.istChef() ? {} : { "X-Bin-Versioning": "true" }) },
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -386,15 +358,6 @@ async function binWrite(apiKey, binId, data) {
     try { msg += ": " + ((await res.json()).message || ""); } catch (e) {}
     throw new Error(msg);
   }
-}
-async function binCreate(apiKey, data) {
-  const res = await fetch("https://api.jsonbin.io/v3/b", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Master-Key": apiKey, "X-Bin-Name": "bestellungen", "X-Bin-Private": "true" },
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) throw new Error("Erstellen fehlgeschlagen");
-  return (await res.json()).metadata.id;
 }
 
 // Form der Bestell-Daten im Speicher (ohne _stand, Backtage wie beim Speichern sortiert und gekürzt)
@@ -408,7 +371,7 @@ async function binListe(apiKey) {
   const alle = [];
   let letzte = "";
   for (let i = 0; i < 5; i++) {
-    const res = await fetch(`https://api.jsonbin.io/v3/c/uncategorized/bins${letzte ? "/" + letzte : ""}`, { headers: { "X-Master-Key": apiKey } });
+    const res = await fetch(`https://api.jsonbin.io/v3/c/uncategorized/bins${letzte ? "/" + letzte : ""}`, { headers: Zugang.kopf() });
     if (!res.ok) break;
     const liste = await res.json();
     if (!Array.isArray(liste) || !liste.length) break;
@@ -843,78 +806,17 @@ function QrCode({ text, size = 220 }) {
 }
 
 // ---------- Setup ----------
-function SetupScreen({ onReady }) {
-  const [link, setLink] = useState("");
-  const [modus, setModus] = useState("neu");
-  const [bestellBin, setBestellBin] = useState("");
-  const [working, setWorking] = useState(false);
-  const [error, setError] = useState("");
-
-  const los = async () => {
-    setError("");
-    const c = parseSetup(link);
-    if (!c) {
-      setError("Das ist kein gültiger Link. Kopiere ihn in der Lager-App unter Einstellungen → „Neues Gerät einrichten“.");
-      return;
-    }
-    if (c.bestellBin) {
-      saveConfig(c);
-      onReady();
-      return;
-    }
-    setWorking(true);
-    try {
-      await binRead(c.apiKey, c.lagerBin); // prüft, ob der Link stimmt
-      let bin = bestellBin.trim();
-      if (modus === "neu") {
-        // Gibt es schon einen Bestell-Speicher (z.B. vom anderen Gerät)? Dann denselben verwenden statt einen zweiten anzulegen.
-        const vorhandene = await andereBestellSpeicher({ ...c, bestellBin: "" });
-        if (vorhandene.length) {
-          vorhandene.sort((a, b) => b.bestellungen + b.kunden - (a.bestellungen + a.kunden));
-          bin = vorhandene[0].id;
-        } else {
-          bin = await binCreate(c.apiKey, leereDaten());
-        }
-      } else await binRead(c.apiKey, bin);
-      saveConfig({ ...c, bestellBin: bin });
-      onReady();
-    } catch (e) {
-      setError("Verbinden fehlgeschlagen: " + (e.message || "unbekannter Fehler"));
-    } finally {
-      setWorking(false);
-    }
-  };
-
+// Gerät ohne Bestell-Speicher-Nr.: einrichten über den QR-Code / Link aus der Bestell-App (Chef)
+function NichtEingerichtet() {
   return (
-    <div className="min-h-screen w-full flex items-center justify-center px-4 py-10" style={{ backgroundColor: COL.bg, fontFamily: "'IBM Plex Sans', sans-serif", color: COL.ink }}>
-      <div className="w-full max-w-md">
-        <div className="flex justify-center mb-6"><Brand /></div>
-        <Card>
-          <h1 className="text-xl mb-1" style={{ fontFamily: "'Fraunces', serif", fontWeight: 700 }}>Bestell-App einrichten 🧾</h1>
-          <p className="text-sm mb-4" style={{ color: COL.inkMuted }}>
-            Die Bestell-App holt sich Rezepte und Rohstoffe aus deiner Lager-App. Öffne dort <b>Einstellungen → Neues Gerät einrichten</b>, kopiere den Link und füge ihn hier ein.
-          </p>
-          <div className="flex flex-col gap-3">
-            <Field label="Link aus der Lager-App (oder Einrichtungs-Link der Bestell-App)">
-              <textarea style={{ ...inputStyle, minHeight: 80, fontSize: 12, fontFamily: "'IBM Plex Mono', monospace" }} value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…#setup=…" />
-            </Field>
-            {!parseSetup(link)?.bestellBin && (
-              <div className="flex gap-1 p-1 rounded-xl" style={{ backgroundColor: COL.bg }}>
-                {[["neu", "Erstes Gerät"], ["vorhanden", "Speicher schon vorhanden"]].map(([k, l]) => (
-                  <button key={k} onClick={() => setModus(k)} className="flex-1 text-sm py-2 rounded-lg" style={{ backgroundColor: modus === k ? COL.accent : "transparent", color: modus === k ? "#fff" : COL.ink }}>{l}</button>
-                ))}
-              </div>
-            )}
-            {modus === "vorhanden" && !parseSetup(link)?.bestellBin && (
-              <Field label="Bestell-Speicher-ID (vom ersten Gerät)">
-                <input style={inputStyle} value={bestellBin} onChange={(e) => setBestellBin(e.target.value)} />
-              </Field>
-            )}
-            {error && <div className="text-sm px-3 py-2 rounded-lg" style={{ backgroundColor: COL.warnSoft, color: COL.warn }}>{error}</div>}
-            <Btn primary onClick={los} disabled={working || !link.trim()}>{working ? "Einen Moment …" : "Los geht's"}</Btn>
-          </div>
-        </Card>
+    <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-6 text-center" style={{ backgroundColor: COL.bg, fontFamily: "'IBM Plex Sans', sans-serif", color: COL.ink }}>
+      <Brand small />
+      <div className="text-4xl">📱</div>
+      <div className="font-semibold">Dieses Gerät kennt den Bestell-Speicher noch nicht.</div>
+      <div className="text-sm max-w-sm" style={{ color: COL.inkMuted }}>
+        Bitte mit dem QR-Code einrichten – den zeigt die Bestell-App am Chef-Gerät unter Einstellungen → 👤 Mitarbeiter → Geräte einrichten.
       </div>
+      <Btn primary onClick={() => Zugang.neuEinrichten()}>Gerät einrichten</Btn>
     </div>
   );
 }
@@ -1149,7 +1051,7 @@ function BestellEditor({ start, sorten, kunden, lager, herstellProzent, letzteBe
   );
 }
 
-function BestellungenTab({ backtag, sorten, kunden, lager, herstellProzent, updateBacktag, addKunde, letzteBestellung }) {
+function BestellungenTab({ nurLesen, backtag, sorten, kunden, lager, herstellProzent, updateBacktag, addKunde, letzteBestellung }) {
   const [editor, setEditor] = useState(null); // null | {} | bestellung
   const [suche, setSuche] = useState("");
   const kName = (id) => kunden.find((k) => k.id === id)?.name || "(unbekannt)";
@@ -1180,7 +1082,7 @@ function BestellungenTab({ backtag, sorten, kunden, lager, herstellProzent, upda
 
   return (
     <div className="flex flex-col gap-3">
-      {editor ? (
+      {nurLesen ? null : editor ? (
         <BestellEditor
           start={editor.id ? { ...editor, kundeName: kName(editor.kundeId) } : null}
           sorten={sorten}
@@ -1212,23 +1114,25 @@ function BestellungenTab({ backtag, sorten, kunden, lager, herstellProzent, upda
         liste.map((b) => (
           <Card key={b.id} className="!p-3.5">
             <div className="flex items-start justify-between gap-2">
-              <button className="text-left flex-1 min-w-0" onClick={() => setEditor(b)}>
+              <button className="text-left flex-1 min-w-0" onClick={() => !nurLesen && setEditor(b)} style={nurLesen ? { cursor: "default" } : undefined}>
                 <div className="font-semibold flex items-center gap-1.5">
                   {kName(b.kundeId)}
                   <span className="text-xs">{b.quelle === "whatsapp" ? "💬" : "✍️"}</span>
-                  {Number(b.rabatt) > 0 && <span className="text-xs font-semibold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: COL.warnSoft, color: COL.warn }}>−{b.rabatt} %</span>}
+                  {!nurLesen && Number(b.rabatt) > 0 && <span className="text-xs font-semibold px-1.5 py-0.5 rounded-full" style={{ backgroundColor: COL.warnSoft, color: COL.warn }}>−{b.rabatt} %</span>}
                 </div>
                 <div className="text-sm mt-0.5" style={{ color: COL.inkMuted }}>{bestellText(b, sorten)}</div>
                 {b.notiz && <div className="text-xs mt-1 truncate" style={{ color: COL.amber }}>📝 {b.notiz}</div>}
                 {b.nachricht && <div className="text-xs mt-1 truncate" style={{ color: "#1F7A3A" }}>💬 „{b.nachricht}“</div>}
               </button>
-              <div className="flex flex-col items-end gap-1.5">
-                <div className="font-semibold" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtEUR(bestellSumme(b, sorten))}</div>
-                <div className="flex gap-1">
-                  <button onClick={() => setEditor(b)} className="p-1.5 rounded-lg" style={{ color: COL.inkMuted }} aria-label="Bearbeiten"><IcEdit size={15} /></button>
-                  <button onClick={() => remove(b)} className="p-1.5 rounded-lg" style={{ color: COL.warn }} aria-label="Löschen"><IcTrash size={15} /></button>
+              {!nurLesen && (
+                <div className="flex flex-col items-end gap-1.5">
+                  <div className="font-semibold" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtEUR(bestellSumme(b, sorten))}</div>
+                  <div className="flex gap-1">
+                    <button onClick={() => setEditor(b)} className="p-1.5 rounded-lg" style={{ color: COL.inkMuted }} aria-label="Bearbeiten"><IcEdit size={15} /></button>
+                    <button onClick={() => remove(b)} className="p-1.5 rounded-lg" style={{ color: COL.warn }} aria-label="Löschen"><IcTrash size={15} /></button>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </Card>
         ))
@@ -1238,7 +1142,7 @@ function BestellungenTab({ backtag, sorten, kunden, lager, herstellProzent, upda
 }
 
 // ---------- Backzettel ----------
-function BackzettelTab({ backtag, sorten, lager, onUebergeben, onReloadLager, onDrucken }) {
+function BackzettelTab({ chef, backtag, sorten, lager, onUebergeben, onReloadLager, onDrucken }) {
   const bz = useMemo(() => berechneBackzettel(backtag, sorten, lager), [backtag, sorten, lager]);
   const [offen, setOffen] = useState({});
   const umsatz = (backtag.bestellungen || []).reduce((s, b) => s + bestellSumme(b, sorten), 0);
@@ -1254,8 +1158,8 @@ function BackzettelTab({ backtag, sorten, lager, onUebergeben, onReloadLager, on
   return (
     <div className="flex flex-col gap-4">
 
-      <div className="grid grid-cols-3 gap-2">
-        {[["🥖", fmtNum(bz.stueckGesamt), "Stück"], ["⚖️", fmtG(bz.teigGesamt), "Teig"], ["💶", fmtEUR(umsatz), "Umsatz"]].map(([e, v, l]) => (
+      <div className={`grid ${chef ? "grid-cols-3" : "grid-cols-2"} gap-2`}>
+        {[["🥖", fmtNum(bz.stueckGesamt), "Stück"], ["⚖️", fmtG(bz.teigGesamt), "Teig"], ...(chef ? [["💶", fmtEUR(umsatz), "Umsatz"]] : [])].map(([e, v, l]) => (
           <Card key={l} className="!p-3 text-center">
             <div className="text-lg">{e}</div>
             <div className="font-semibold text-base sm:text-lg leading-tight" style={{ fontFamily: "'Fraunces', serif" }}>{v}</div>
@@ -1393,11 +1297,13 @@ function BackzettelTab({ backtag, sorten, lager, onUebergeben, onReloadLager, on
 
       <div className="flex flex-wrap gap-2 no-print">
         <Btn onClick={() => onDrucken("backzettel")}><IcPrint size={16} /> Backzettel drucken</Btn>
-        <Btn primary onClick={() => onUebergeben(bz)} disabled={!bz.rohstoffe.length}>
-          <IcSend size={16} /> {backtag.lagerUebergeben ? "Nochmal an Lager-App senden" : "An Lager-App übergeben"}
-        </Btn>
+        {chef && (
+          <Btn primary onClick={() => onUebergeben(bz)} disabled={!bz.rohstoffe.length}>
+            <IcSend size={16} /> {backtag.lagerUebergeben ? "Nochmal an Lager-App senden" : "An Lager-App übergeben"}
+          </Btn>
+        )}
       </div>
-      {backtag.lagerUebergeben && (
+      {chef && backtag.lagerUebergeben && (
         <div className="text-sm no-print" style={{ color: COL.ok }}>✅ Am {new Date(backtag.lagerUebergeben).toLocaleString("de-DE")} an die Lager-App übergeben.</div>
       )}
     </div>
@@ -1858,6 +1764,269 @@ function KassaTab({ backtag, sorten, kunden, lager, herstellProzent, updateBackt
 }
 
 // ---------- Einstellungen ----------
+// ---------- Mitarbeiter & Protokoll (nur Chef) ----------
+// Namen und Codes liegen im Team-Speicher (jsonbin), Codes nur als Prüfwert – niemand kann sie später ablesen.
+const PROTOKOLL_APPS = { rezept: "Rezept-App", bestell: "Bestell-App", lager: "Lager-App" };
+function TeamBereich({ daten, setDaten }) {
+  const [team, setTeam] = useState(null);
+  const [laedt, setLaedt] = useState(false);
+  const [fehler, setFehler] = useState("");
+  const [hinweis, setHinweis] = useState("");
+  const [neuName, setNeuName] = useState("");
+  const [neuCode, setNeuCode] = useState("");
+  const [chefName, setChefName] = useState("");
+  const [qr, setQr] = useState(null); // { app, chef }
+  const [wer, setWer] = useState("");
+  const [welcheApp, setWelcheApp] = useState("");
+  const [zeitraum, setZeitraum] = useState("7");
+  const [codes, setCodes] = useState({ alt: "", neu: "", neu2: "" });
+  const teamBin = Zugang.geraet().teamBin || daten.teamBin;
+
+  const ausfuehren = async (fn) => {
+    setLaedt(true);
+    setFehler("");
+    try { await fn(); } catch (e) { setFehler(e.message || String(e)); }
+    setLaedt(false);
+  };
+  const laden = () => ausfuehren(async () => {
+    if (!Zugang.geraet().teamBin) return;
+    await Zugang.senden();
+    const t = await Zugang.teamHolen();
+    setTeam(t);
+    setChefName(t.chefName || "Chef");
+  });
+  useEffect(() => {
+    if (daten.teamBin) Zugang.teamBinSetzen(daten.teamBin);
+    else if (Zugang.geraet().teamBin) setDaten((d) => ({ ...d, teamBin: Zugang.geraet().teamBin })); // damit jedes Gerät ihn findet
+    laden();
+  }, []);
+
+  const einrichten = () => ausfuehren(async () => {
+    const t = await Zugang.teamEinrichten();
+    setTeam(t);
+    setChefName(t.chefName || "Chef");
+    setDaten((d) => ({ ...d, teamBin: Zugang.geraet().teamBin }));
+    setHinweis("Mitarbeiter-Zugang ist eingerichtet. Leg jetzt deine Mitarbeiter an.");
+  });
+  const vorschlag = () => String(1000 + Math.floor(Math.random() * 9000));
+  const anlegen = () => ausfuehren(async () => {
+    const name = neuName.trim();
+    const code = neuCode.trim();
+    if (!name) throw new Error("Bitte einen Namen eingeben");
+    if (!/^\d{4}$/.test(code)) throw new Error("Der Code muss genau 4 Ziffern haben");
+    const t = await Zugang.teamAendern(async (t) => {
+      if (await Zugang.codeVergeben(t, code)) throw new Error("Diesen Code hat schon jemand – bitte einen anderen wählen");
+      return { ...t, mitarbeiter: [...t.mitarbeiter, { id: uid(), name, ...(await Zugang.codeDaten(code)), aktiv: true, seit: Date.now() }] };
+    });
+    setTeam(t);
+    Zugang.log(`Mitarbeiter angelegt: ${name}`);
+    setHinweis(`${name} ist angelegt. Code: ${code} – bitte notieren und ${name} sagen. Später kann ihn niemand mehr ablesen.`);
+    setNeuName("");
+    setNeuCode("");
+  });
+  const aendern = (id, fn, logText) => ausfuehren(async () => {
+    const t = await Zugang.teamAendern(async (t) => ({ ...t, mitarbeiter: await Promise.all(t.mitarbeiter.map(async (m) => (m.id === id ? { ...m, ...(await fn(m, t)) } : m))) }));
+    setTeam(t);
+    if (logText) Zugang.log(logText);
+  });
+  const neuerCode = (m) => {
+    const eingabe = window.prompt(`Neuer 4-stelliger Code für ${m.name}:`, vorschlag());
+    if (eingabe == null) return;
+    const code = eingabe.trim();
+    if (!/^\d{4}$/.test(code)) { setFehler("Der Code muss genau 4 Ziffern haben"); return; }
+    ausfuehren(async () => {
+      const t = await Zugang.teamAendern(async (t) => {
+        if (await Zugang.codeVergeben(t, code, m.id)) throw new Error("Diesen Code hat schon jemand – bitte einen anderen wählen");
+        const neu = await Zugang.codeDaten(code);
+        return { ...t, mitarbeiter: t.mitarbeiter.map((x) => (x.id === m.id ? { ...x, ...neu } : x)) };
+      });
+      setTeam(t);
+      Zugang.log(`Neuer Code für ${m.name}`);
+      setHinweis(`Neuer Code für ${m.name}: ${code} – bitte notieren.`);
+    });
+  };
+  const entfernen = (m) => {
+    if (!window.confirm(`${m.name} entfernen? Die Einträge im Protokoll bleiben erhalten.`)) return;
+    ausfuehren(async () => {
+      const t = await Zugang.teamAendern(async (t) => ({ ...t, mitarbeiter: t.mitarbeiter.filter((x) => x.id !== m.id) }));
+      setTeam(t);
+      Zugang.log(`Mitarbeiter entfernt: ${m.name}`);
+    });
+  };
+  const chefNameSpeichern = () => ausfuehren(async () => {
+    const t = await Zugang.teamAendern(async (t) => ({ ...t, chefName: chefName.trim() || "Chef" }));
+    setTeam(t);
+    setHinweis("Gespeichert. Ab der nächsten Anmeldung stehst du so im Protokoll.");
+  });
+  const chefCodeAendern = () => ausfuehren(async () => {
+    if (!/^\d{6,10}$/.test(codes.neu)) throw new Error("Der neue Chef-Code braucht 6 bis 10 Ziffern");
+    if (codes.neu !== codes.neu2) throw new Error("Die neuen Codes sind nicht gleich");
+    try { await Zugang.chefCodeAendern(codes.alt, codes.neu); } catch (e) { throw new Error("Der bisherige Chef-Code stimmt nicht"); }
+    setCodes({ alt: "", neu: "", neu2: "" });
+    Zugang.log("Chef-Code geändert (auf diesem Gerät)");
+    setHinweis("Chef-Code geändert – gilt auf diesem Gerät. Auf deinen anderen Geräten bleibt der alte, bis du ihn dort auch änderst.");
+  });
+
+  const mitarbeiter = (team && team.mitarbeiter) || [];
+  const namen = { chef: (team && team.chefName) || "Chef", ...Object.fromEntries(mitarbeiter.map((m) => [m.id, m.name])) };
+  const ab = zeitraum === "alle" ? 0 : zeitraum === "heute" ? new Date(new Date().toDateString()).getTime() : Date.now() - Number(zeitraum) * 864e5;
+  const protokoll = [...((team && team.protokoll) || [])].reverse().filter((e) => e.z >= ab && (!wer || e.w === wer) && (!welcheApp || e.a === welcheApp));
+  const offen = Zugang.offeneEintraege();
+  const link = qr ? Zugang.linkBauen(qr.app, qr.chef) : "";
+
+  if (!teamBin) {
+    return (
+      <Card>
+        <H2>👤 Mitarbeiter-Zugang</H2>
+        <p className="text-sm mb-3" style={{ color: COL.inkMuted }}>
+          Jeder Mitarbeiter bekommt einen eigenen 4-stelligen Code. In der Rezept-, Bestell- und Lager-App sehen Mitarbeiter dann nur, was sie für die Arbeit brauchen (Abwiegen, Expedit, Lagerstand) – ohne Preise, Kundendaten und Einstellungen. Was sie machen, steht im Protokoll.
+        </p>
+        <p className="text-sm mb-3" style={{ color: COL.inkMuted }}>
+          Beim Einrichten legt die App bei jsonbin einen eigenen Mitarbeiter-Schlüssel an (darf lesen und ändern, aber nichts löschen) und einen kleinen Speicher für Mitarbeiter und Protokoll.
+        </p>
+        {fehler && <div className="text-sm mb-2" style={{ color: COL.warn }}>⚠️ {fehler}</div>}
+        <Btn primary onClick={einrichten} disabled={laedt}>{laedt ? "Wird eingerichtet …" : "Mitarbeiter-Zugang einrichten"}</Btn>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      {hinweis && (
+        <div className="flex items-start gap-2 text-sm px-4 py-3 rounded-2xl" style={{ backgroundColor: COL.okSoft, color: COL.ok }}>
+          <span className="flex-1">✅ {hinweis}</span>
+          <button onClick={() => setHinweis("")} aria-label="Schließen"><IcX size={16} /></button>
+        </div>
+      )}
+      {fehler && <div className="text-sm px-4 py-3 rounded-2xl" style={{ backgroundColor: COL.warnSoft, color: COL.warn }}>⚠️ {fehler}</div>}
+
+      <Card>
+        <H2 right={<button onClick={laden} className="text-sm" style={{ color: COL.accent }} disabled={laedt}>{laedt ? "…" : "🔄 Aktualisieren"}</button>}>👤 Mitarbeiter</H2>
+        {!team && laedt && <p className="text-sm" style={{ color: COL.inkMuted }}>Wird geladen …</p>}
+        {team && mitarbeiter.length === 0 && <p className="text-sm" style={{ color: COL.inkMuted }}>Noch keine Mitarbeiter angelegt.</p>}
+        <div className="flex flex-col">
+          {mitarbeiter.map((m, i) => (
+            <div key={m.id} className="flex flex-wrap items-center gap-2 py-2" style={{ borderTop: i ? `1px solid ${COL.line}` : "none", opacity: m.aktiv === false ? 0.55 : 1 }}>
+              <span className="font-semibold flex-1" style={{ minWidth: 120 }}>{m.name}{m.aktiv === false ? " (gesperrt)" : ""}</span>
+              <button className="text-sm" style={{ color: COL.accent }} onClick={() => neuerCode(m)}>Neuer Code</button>
+              <button className="text-sm" style={{ color: COL.inkMuted }} onClick={() => aendern(m.id, async () => ({ aktiv: m.aktiv === false }), `${m.name} ${m.aktiv === false ? "entsperrt" : "gesperrt"}`)}>
+                {m.aktiv === false ? "Entsperren" : "Sperren"}
+              </button>
+              <button className="text-sm" style={{ color: COL.warn }} onClick={() => entfernen(m)}>Entfernen</button>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${COL.line}` }}>
+          <div className="text-sm font-semibold mb-2">Neuen Mitarbeiter anlegen</div>
+          <div className="flex flex-wrap gap-2">
+            <input style={{ ...inputStyle, flex: "1 1 160px" }} placeholder="Name" value={neuName} onChange={(e) => setNeuName(e.target.value)} />
+            <input style={{ ...inputStyle, width: 110, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: "0.2em" }} placeholder="Code" inputMode="numeric" maxLength={4} value={neuCode} onChange={(e) => setNeuCode(e.target.value.replace(/\D/g, "").slice(0, 4))} />
+            <Btn small onClick={() => setNeuCode(vorschlag())}>🎲 Vorschlag</Btn>
+            <Btn small primary onClick={anlegen} disabled={laedt}>Anlegen</Btn>
+          </div>
+          <p className="text-xs mt-2" style={{ color: COL.inkMuted }}>Den Code siehst du nur jetzt beim Anlegen – bitte notieren. Vergessen? Dann einfach „Neuer Code“.</p>
+        </div>
+      </Card>
+
+      <Card>
+        <H2>📱 Geräte einrichten</H2>
+        <p className="text-sm mb-3" style={{ color: COL.inkMuted }}>QR-Code mit dem Handy oder Tablet scannen (Kamera) – die App richtet sich dann selbst ein. Auf dem iPhone/iPad danach in Safari „Zum Home-Bildschirm“.</p>
+        <div className="text-xs font-semibold mb-1" style={{ color: COL.inkMuted }}>FÜR MITARBEITER (ohne deinen Generalschlüssel)</div>
+        <div className="flex flex-wrap gap-2 mb-3">
+          <Btn small onClick={() => setQr({ app: "rezept", chef: false })}>Rezept-App</Btn>
+          <Btn small onClick={() => setQr({ app: "bestell", chef: false })}>Bestell-App</Btn>
+          <Btn small onClick={() => setQr({ app: "lager", chef: false })}>Lager-App (Lagerstand)</Btn>
+        </div>
+        <div className="text-xs font-semibold mb-1" style={{ color: COL.inkMuted }}>FÜR DICH (Chef – auch fürs gemeinsame Tablet)</div>
+        <div className="flex flex-wrap gap-2">
+          <Btn small onClick={() => setQr({ app: "rezept", chef: true })}>Rezept-App</Btn>
+          <Btn small onClick={() => setQr({ app: "bestell", chef: true })}>Bestell-App</Btn>
+          <Btn small onClick={() => setQr({ app: "lager", chef: true })}>Lager-App</Btn>
+        </div>
+        {qr && (
+          <div className="flex flex-col items-center gap-2 mt-4 p-3 rounded-xl" style={{ backgroundColor: COL.bg }}>
+            <div className="font-semibold text-sm">{PROTOKOLL_APPS[qr.app]} · {qr.chef ? "Chef-Gerät" : "Mitarbeiter-Gerät"}</div>
+            <QrCode text={link} size={230} />
+            <input readOnly value={link} onFocus={(e) => e.target.select()} style={{ ...inputStyle, width: "100%", fontSize: 11, fontFamily: "'IBM Plex Mono', monospace" }} />
+            <p className="text-xs text-center" style={{ color: qr.chef ? COL.warn : COL.inkMuted }}>
+              {qr.chef
+                ? "Enthält deinen Generalschlüssel – verschlüsselt mit deinem Chef-Code. Trotzdem nur mit eigenen Geräten scannen und nicht weiterschicken."
+                : "Mitarbeiter melden sich danach mit ihrem eigenen 4-stelligen Code an."}
+            </p>
+            <Btn small onClick={() => setQr(null)}>Schließen</Btn>
+          </div>
+        )}
+      </Card>
+
+      <Card>
+        <H2 right={<button onClick={laden} className="text-sm" style={{ color: COL.accent }} disabled={laedt}>{laedt ? "…" : "🔄 Aktualisieren"}</button>}>📜 Protokoll</H2>
+        <div className="flex flex-wrap gap-2 mb-3">
+          <select style={{ ...inputStyle, flex: "1 1 130px" }} value={wer} onChange={(e) => setWer(e.target.value)}>
+            <option value="">Alle Personen</option>
+            <option value="chef">{namen.chef}</option>
+            {mitarbeiter.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+          <select style={{ ...inputStyle, flex: "1 1 120px" }} value={welcheApp} onChange={(e) => setWelcheApp(e.target.value)}>
+            <option value="">Alle Apps</option>
+            {Object.entries(PROTOKOLL_APPS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          </select>
+          <select style={{ ...inputStyle, flex: "1 1 110px" }} value={zeitraum} onChange={(e) => setZeitraum(e.target.value)}>
+            <option value="heute">Heute</option>
+            <option value="7">7 Tage</option>
+            <option value="30">30 Tage</option>
+            <option value="alle">Alles (60 Tage)</option>
+          </select>
+        </div>
+        {offen > 0 && <p className="text-xs mb-2" style={{ color: COL.amber }}>{offen} Einträge von diesem Gerät warten noch aufs Internet.</p>}
+        {protokoll.length === 0 ? (
+          <p className="text-sm" style={{ color: COL.inkMuted }}>Keine Einträge.</p>
+        ) : (
+          <div className="flex flex-col">
+            {protokoll.slice(0, 300).map((e, i) => {
+              const d = new Date(e.z);
+              const neuerTag = i === 0 || new Date(protokoll[i - 1].z).toDateString() !== d.toDateString();
+              return (
+                <React.Fragment key={e.id}>
+                  {neuerTag && <div className="text-xs font-semibold uppercase mt-3 mb-1" style={{ color: COL.accent, letterSpacing: "0.06em" }}>{d.toLocaleDateString("de-AT", { weekday: "long", day: "numeric", month: "long" })}</div>}
+                  <div className="flex gap-2 text-sm py-1.5" style={{ borderTop: neuerTag ? "none" : `1px dashed ${COL.line}` }}>
+                    <span className="shrink-0" style={{ fontFamily: "'IBM Plex Mono', monospace", color: COL.inkMuted }}>{d.toLocaleTimeString("de-AT", { hour: "2-digit", minute: "2-digit" })}</span>
+                    <span className="min-w-0">
+                      <b>{namen[e.w] || e.n}</b>
+                      <span className="text-xs" style={{ color: COL.inkMuted }}> · {PROTOKOLL_APPS[e.a] || e.a}</span>
+                      <br />{e.t}
+                    </span>
+                  </div>
+                </React.Fragment>
+              );
+            })}
+          </div>
+        )}
+        <p className="text-xs mt-2" style={{ color: COL.inkMuted }}>Aufgehoben werden die letzten 60 Tage (höchstens 600 Einträge).</p>
+      </Card>
+
+      <Card>
+        <H2>🔑 Chef</H2>
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="flex-1" style={{ minWidth: 160 }}>
+            <Field label="So heißt du im Protokoll"><input style={inputStyle} value={chefName} onChange={(e) => setChefName(e.target.value)} /></Field>
+          </div>
+          <Btn small onClick={chefNameSpeichern} disabled={laedt}>Speichern</Btn>
+        </div>
+        <details className="mt-3">
+          <summary className="text-sm cursor-pointer" style={{ color: COL.accent }}>Chef-Code ändern</summary>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2">
+            <input style={inputStyle} type="password" inputMode="numeric" placeholder="Bisheriger Chef-Code" value={codes.alt} onChange={(e) => setCodes({ ...codes, alt: e.target.value.replace(/\D/g, "") })} />
+            <input style={inputStyle} type="password" inputMode="numeric" placeholder="Neuer Code (6–10 Ziffern)" value={codes.neu} onChange={(e) => setCodes({ ...codes, neu: e.target.value.replace(/\D/g, "") })} />
+            <input style={inputStyle} type="password" inputMode="numeric" placeholder="Neuer Code nochmal" value={codes.neu2} onChange={(e) => setCodes({ ...codes, neu2: e.target.value.replace(/\D/g, "") })} />
+          </div>
+          <div className="mt-2"><Btn small primary onClick={chefCodeAendern} disabled={laedt}>Chef-Code ändern</Btn></div>
+          <p className="text-xs mt-2" style={{ color: COL.inkMuted }}>Gilt auf diesem Gerät. Geräte, die du danach per QR-Code einrichtest, bekommen den neuen Code.</p>
+        </details>
+      </Card>
+    </div>
+  );
+}
+
 function EinstellungenTab({ daten, setDaten, lager, config, onReloadLager, onDisconnect, letzterStand, onAbgleichen, onSpeicherPruefen }) {
   const [bereich, setBereich] = useState("sorten");
   const [neueKunden, setNeueKunden] = useState("");
@@ -1889,7 +2058,7 @@ function EinstellungenTab({ daten, setDaten, lager, config, onReloadLager, onDis
   return (
     <div className="flex flex-col gap-4">
       <div className="flex gap-1 p-1 rounded-xl" style={{ backgroundColor: COL.surface, border: `1px solid ${COL.line}` }}>
-        {[["sorten", "🥖 Sorten"], ["kunden", "👥 Kunden"], ["app", "⚙️ App"]].map(([k, l]) => (
+        {[["sorten", "🥖 Sorten"], ["kunden", "👥 Kunden"], ["team", "👤 Mitarbeiter"], ["app", "⚙️ App"]].map(([k, l]) => (
           <button key={k} onClick={() => setBereich(k)} className="flex-1 text-sm py-2 rounded-lg" style={{ backgroundColor: bereich === k ? COL.accent : "transparent", color: bereich === k ? "#fff" : COL.ink }}>{l}</button>
         ))}
       </div>
@@ -2064,6 +2233,8 @@ function EinstellungenTab({ daten, setDaten, lager, config, onReloadLager, onDis
         </>
       )}
 
+      {bereich === "team" && <TeamBereich daten={daten} setDaten={setDaten} />}
+
       {bereich === "app" && (
         <Card>
           <div className="flex flex-col gap-3 text-sm">
@@ -2113,16 +2284,9 @@ function EinstellungenTab({ daten, setDaten, lager, config, onReloadLager, onDis
               </div>
             </div>
             <div>💾 Speicher belegt: <b>{fmtNum(groesse / 1024)} kb</b> von 100 kb (die letzten {MAX_BACKTAGE} Backtage werden aufgehoben)</div>
-            <Btn onClick={() => setZeigeLink(!zeigeLink)}>📱 Neues Gerät einrichten</Btn>
-            {zeigeLink && (
-              <div className="flex flex-col items-center gap-2">
-                <QrCode text={makeSetupUrl(config)} size={220} />
-                <input readOnly value={makeSetupUrl(config)} onFocus={(e) => e.target.select()} style={{ ...inputStyle, width: "100%", fontSize: 11, fontFamily: "'IBM Plex Mono', monospace" }} />
-                <p className="text-xs text-center" style={{ color: COL.warn }}>Achtung: Wer diesen Link hat, kann auf deine Daten zugreifen – nur mit eigenen Geräten teilen.</p>
-              </div>
-            )}
+            <div className="text-sm" style={{ color: COL.inkMuted }}>📱 Neue Geräte richtest du unter <b>👤 Mitarbeiter → Geräte einrichten</b> ein (für dich oder für Mitarbeiter).</div>
             <a href={LAGER_APP_URL} className="underline" style={{ color: COL.accent }}>→ Zur Lager-App</a>
-            <Btn danger onClick={onDisconnect}>Verbindung auf diesem Gerät trennen</Btn>
+            <Btn onClick={() => Zugang.abmelden()}>Abmelden</Btn>
           </div>
         </Card>
       )}
@@ -2208,6 +2372,58 @@ function abgleichen(basis, mein, dein, schluessel) {
   return mein; // beide Geräte haben denselben Wert geändert -> dieses Gerät gewinnt
 }
 
+// ---------- Protokoll: was hat der Chef geändert? (kurze Sätze, Expedit-Häkchen ausgenommen) ----------
+function bestellAenderungen(alt, neu) {
+  if (!alt || !neu) return [];
+  const zeilen = [];
+  const kName = (id) => (neu.kunden || []).find((k) => k.id === id)?.name || (alt.kunden || []).find((k) => k.id === id)?.name || "unbekannt";
+  const vergleich = (b) => { const { expedit, bezahlt, ...rest } = b || {}; return JSON.stringify(rest); };
+  const nachId = (liste) => new Map((liste || []).map((x) => [x.id, x]));
+
+  const altK = nachId(alt.kunden), neuK = nachId(neu.kunden);
+  neuK.forEach((k, id) => {
+    if (!altK.has(id)) zeilen.push(`Kunde angelegt: ${k.name}`);
+    else if (altK.get(id).name !== k.name) zeilen.push(`Kunde umbenannt: ${altK.get(id).name} → ${k.name}`);
+  });
+  altK.forEach((k, id) => { if (!neuK.has(id)) zeilen.push(`Kunde gelöscht: ${k.name}`); });
+
+  const altB = nachId(alt.backtage), neuB = nachId(neu.backtage);
+  neuB.forEach((bt, id) => {
+    const d = fmtDatum(bt.datum);
+    const ab = altB.get(id);
+    if (!ab) zeilen.push(`Backtag angelegt: ${d}`);
+    const aBest = nachId(ab && ab.bestellungen);
+    (bt.bestellungen || []).forEach((b) => {
+      const a = aBest.get(b.id);
+      if (!a) zeilen.push(`Bestellung ${kName(b.kundeId)} (${d}) eingetragen: ${bestellText(b, neu.sorten)}`);
+      else {
+        if (vergleich(a) !== vergleich(b)) zeilen.push(`Bestellung ${kName(b.kundeId)} (${d}) geändert: ${bestellText(b, neu.sorten)}`);
+        if (!!a.bezahlt !== !!b.bezahlt) zeilen.push(`${kName(b.kundeId)} (${d}): ${b.bezahlt ? "bezahlt" : "wieder nicht bezahlt"}`);
+      }
+    });
+    aBest.forEach((a, bid) => { if (!(bt.bestellungen || []).some((b) => b.id === bid)) zeilen.push(`Bestellung ${kName(a.kundeId)} (${d}) gelöscht`); });
+    if (ab && bt.lagerUebergeben && ab.lagerUebergeben !== bt.lagerUebergeben) zeilen.push(`Backzettel ${d} an die Lager-App übergeben`);
+  });
+  altB.forEach((bt, id) => { if (!neuB.has(id)) zeilen.push(`Backtag gelöscht: ${fmtDatum(bt.datum)}`); });
+
+  const altS = nachId(alt.sorten), neuS = nachId(neu.sorten);
+  neuS.forEach((s, id) => {
+    if (!altS.has(id)) zeilen.push(`Sorte angelegt: ${s.kurz}`);
+    else if (JSON.stringify(altS.get(id)) !== JSON.stringify(s)) zeilen.push(`Sorte geändert: ${s.kurz}`);
+  });
+  altS.forEach((s, id) => { if (!neuS.has(id)) zeilen.push(`Sorte gelöscht: ${s.kurz}`); });
+  if (JSON.stringify(alt.herstellProzent) !== JSON.stringify(neu.herstellProzent)) zeilen.push(`Herstellungskosten: ${neu.herstellProzent} % der Materialkosten`);
+  return zeilen;
+}
+// Gleiche Sätze innerhalb von 3 Minuten nur einmal (z. B. beim Tippen in einem Namensfeld)
+const zuletztProtokolliert = new Map();
+function protokollieren(zeilen) {
+  const jetzt = Date.now();
+  const neu = zeilen.filter((z) => !(jetzt - (zuletztProtokolliert.get(z) || 0) < 180000));
+  neu.slice(0, 8).forEach((z) => { zuletztProtokolliert.set(z, jetzt); Zugang.log(z); });
+  if (neu.length > 8) Zugang.log(`… und ${neu.length - 8} weitere Änderungen`);
+}
+
 const fmtStand = (st) => {
   if (!st || !st.zeit) return "";
   const d = new Date(st.zeit);
@@ -2252,8 +2468,11 @@ function ExpeditTab({ backtag, sorten, kunden, updateBacktag }) {
   }, [backtag, sorten, kunden]);
 
   // Bestätigen bzw. wieder auf offen setzen – gilt für alle Bestellungen dieses Kunden mit dieser Sorte
-  const setzen = (kundeId, sorteId, fertig) =>
-    updateBacktag((bt) => ({
+  const setzen = (kundeId, sorteId, fertig) => {
+    const s = sorten.find((x) => x.id === sorteId);
+    const menge = (backtag.bestellungen || []).filter((b) => b.kundeId === kundeId).reduce((n, b) => n + (Number(b.items?.[sorteId]) || 0), 0);
+    Zugang.log(`Expedit ${fmtDatum(backtag.datum)}: ${kName(kundeId)} – ${fmtQty(menge)}× ${s ? s.kurz : "?"} ${fertig ? "eingepackt ✓" : "wieder offen"}`);
+    return updateBacktag((bt) => ({
       ...bt,
       bestellungen: bt.bestellungen.map((b) => {
         const q = Number(b.items?.[sorteId]) || 0;
@@ -2264,6 +2483,7 @@ function ExpeditTab({ backtag, sorten, kunden, updateBacktag }) {
         return { ...b, expedit };
       }),
     }));
+  };
 
   if (produkte.length === 0) {
     return <Card><p className="text-sm text-center py-8" style={{ color: COL.inkMuted }}>📦 Hier erscheinen alle Produkte, sobald Bestellungen eingetragen sind.</p></Card>;
@@ -2384,6 +2604,9 @@ const TABS = [
 ];
 
 function App() {
+  // Chef sieht alles; Mitarbeiter nur Bestellungen (ansehen), Backzettel und Expedit (abhaken)
+  const chef = Zugang.istChef();
+  const tabs = chef ? TABS : TABS.filter((t) => ["bestellungen", "backzettel", "expedit"].includes(t.key));
   const [config, setConfig] = useState(() => getConfig());
   const [daten, setDaten] = useState(leereDaten);
   const [lager, setLager] = useState(null);
@@ -2454,9 +2677,12 @@ function App() {
         const d = res.daten;
         const kommend = [...d.backtage].sort((a, b) => a.datum.localeCompare(b.datum)).find((b) => b.datum >= isoHeute());
         setBacktagId((kommend || d.backtage[d.backtage.length - 1])?.id || null);
+        // Team-Speicher (Mitarbeiter & Protokoll): steht im Bestell-Speicher, damit jedes Gerät ihn kennt
+        if (d.teamBin) Zugang.teamBinSetzen(d.teamBin);
+        else if (chef && Zugang.geraet().teamBin) setDaten((x) => ({ ...x, teamBin: Zugang.geraet().teamBin }));
         loadedRef.current = true;
         setLoading(false);
-        speicherPruefen(config);
+        if (chef) speicherPruefen(config);
       } catch (e) {
         // Nicht mit leeren Daten weiterarbeiten – sonst würden die echten Daten beim Speichern überschrieben
         if (cancelled) return;
@@ -2484,7 +2710,10 @@ function App() {
       setAbgleichInfo(cloud._stand || { zeit: new Date().toISOString() });
     }
     const stand = neuerStand();
+    // Protokoll: was hat der Chef auf diesem Gerät geändert? (Expedit-Häkchen werden extra protokolliert)
+    const aenderungen = Zugang.istChef() ? bestellAenderungen(basisRef.current, mein) : [];
     await binWrite(c.apiKey, c.bestellBin, { ...ziel, _stand: stand });
+    protokollieren(aenderungen);
     basisRef.current = ziel;
     basisZeitRef.current = Date.now();
     setLetzterStand(stand);
@@ -2559,7 +2788,7 @@ function App() {
       try {
         fetch(`https://api.jsonbin.io/v3/b/${c.bestellBin}`, {
           method: "PUT",
-          headers: { "Content-Type": "application/json", "X-Master-Key": c.apiKey },
+          headers: { ...Zugang.kopf(true), ...(Zugang.istChef() ? {} : { "X-Bin-Versioning": "true" }) },
           body: JSON.stringify({ ...bestellNormalisieren(d), _stand: neuerStand() }),
           keepalive: true,
         });
@@ -2616,7 +2845,7 @@ function App() {
     }
   };
 
-  if (!config) return <SetupScreen onReady={() => setConfig(getConfig())} />;
+  if (!config) return <NichtEingerichtet />;
   if (loading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-4" style={{ backgroundColor: COL.bg, fontFamily: "'IBM Plex Sans', sans-serif", color: COL.inkMuted }}>
@@ -2709,9 +2938,14 @@ function App() {
           <div className="relative rounded-3xl px-5 py-4" style={{ background: `radial-gradient(circle at 85% 20%, rgba(232,182,76,0.28), transparent 45%), linear-gradient(135deg, ${COL.crust} 0%, #5A3A24 100%)`, boxShadow: "0 10px 30px rgba(59,42,30,0.25)" }}>
             <div className="flex items-center justify-between gap-2">
               <Brand light small />
-              <span className="text-xs px-2.5 py-1 rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.1)", color: sync === "error" ? "#FFD2C2" : "rgba(255,255,255,0.75)" }} title={syncFehler}>
-                {sync === "saving" ? "speichert …" : sync === "saved" ? "✓ gespeichert" : sync === "error" ? "⚠ nicht gespeichert" : "bereit"}
-              </span>
+              <div className="flex flex-col items-end gap-1">
+                <span className="text-xs px-2.5 py-1 rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.1)", color: sync === "error" ? "#FFD2C2" : "rgba(255,255,255,0.75)" }} title={syncFehler}>
+                  {sync === "saving" ? "speichert …" : sync === "saved" ? "✓ gespeichert" : sync === "error" ? "⚠ nicht gespeichert" : "bereit"}
+                </span>
+                <button onClick={() => Zugang.abmelden()} className="text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap" style={{ backgroundColor: "rgba(255,255,255,0.16)", color: "#fff" }} title="Abmelden">
+                  👤 {Zugang.sitzung?.name} · Abmelden
+                </button>
+              </div>
             </div>
             <div className="mt-3 text-white text-lg" style={{ fontFamily: "'Fraunces', serif", fontWeight: 600 }}>Bestellungen 🧾</div>
             <div className="flex items-center gap-2 mt-2">
@@ -2728,7 +2962,7 @@ function App() {
                   </option>
                 ))}
               </select>
-              <button onClick={neuerBacktag} className="text-sm font-semibold px-3 py-2.5 rounded-xl whitespace-nowrap" style={{ backgroundColor: COL.wheat, color: COL.crust }}>+ Backtag</button>
+              {chef && <button onClick={neuerBacktag} className="text-sm font-semibold px-3 py-2.5 rounded-xl whitespace-nowrap" style={{ backgroundColor: COL.wheat, color: COL.crust }}>+ Backtag</button>}
             </div>
             {neuDatum !== null && (
               <div className="flex flex-wrap items-center gap-2 mt-2 p-2 rounded-xl" style={{ backgroundColor: "rgba(255,255,255,0.1)", animation: "fadeIn .2s ease" }}>
@@ -2777,7 +3011,7 @@ function App() {
         )}
 
         <nav className="hidden sm:flex gap-1 mb-4 p-1 rounded-2xl w-fit no-print" style={{ backgroundColor: COL.surface, border: `1px solid ${COL.line}` }}>
-          {TABS.map((t) => {
+          {tabs.map((t) => {
             const I = t.icon;
             const on = tab === t.key;
             return (
@@ -2788,7 +3022,7 @@ function App() {
           })}
         </nav>
 
-        {tab === "einstellungen" ? (
+        {tab === "einstellungen" && chef ? (
           <EinstellungenTab
             daten={daten}
             setDaten={setDaten}
@@ -2804,22 +3038,28 @@ function App() {
           <Card>
             <div className="text-center py-8">
               <div className="text-4xl mb-2">🗓</div>
-              <p className="text-sm mb-4" style={{ color: COL.inkMuted }}>Leg zuerst einen Backtag an – dann kannst du Bestellungen eintragen.</p>
-              <Btn primary onClick={neuerBacktag}><IcPlus size={16} /> Backtag anlegen</Btn>
+              {chef ? (
+                <>
+                  <p className="text-sm mb-4" style={{ color: COL.inkMuted }}>Leg zuerst einen Backtag an – dann kannst du Bestellungen eintragen.</p>
+                  <Btn primary onClick={neuerBacktag}><IcPlus size={16} /> Backtag anlegen</Btn>
+                </>
+              ) : (
+                <p className="text-sm" style={{ color: COL.inkMuted }}>Noch kein Backtag eingetragen.</p>
+              )}
             </div>
           </Card>
         ) : tab === "bestellungen" ? (
-          <BestellungenTab backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} lager={lager} herstellProzent={herstellProzentVon(daten)} updateBacktag={updateBacktag} addKunde={addKunde} letzteBestellung={letzteBestellung} />
+          <BestellungenTab nurLesen={!chef} backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} lager={lager} herstellProzent={herstellProzentVon(daten)} updateBacktag={updateBacktag} addKunde={addKunde} letzteBestellung={letzteBestellung} />
         ) : tab === "backzettel" ? (
-          <BackzettelTab backtag={backtag} sorten={daten.sorten} lager={lager} onUebergeben={uebergeben} onReloadLager={() => ladeLager()} onDrucken={setDruck} />
-        ) : tab === "expedit" ? (
+          <BackzettelTab chef={chef} backtag={backtag} sorten={daten.sorten} lager={lager} onUebergeben={uebergeben} onReloadLager={() => ladeLager()} onDrucken={setDruck} />
+        ) : tab === "expedit" || !chef ? (
           <ExpeditTab backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} updateBacktag={updateBacktag} />
         ) : (
           <KassaTab backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} lager={lager} herstellProzent={herstellProzentVon(daten)} updateBacktag={updateBacktag} onDrucken={setDruck} />
         )}
 
         <nav className="sm:hidden bottom-nav no-print fixed bottom-0 left-0 right-0 z-20 flex justify-around px-2 pt-2" style={{ backgroundColor: "rgba(255,255,255,0.95)", backdropFilter: "blur(10px)", borderTop: `1px solid ${COL.line}` }}>
-          {TABS.map((t) => {
+          {tabs.map((t) => {
             const I = t.icon;
             const on = tab === t.key;
             return (
@@ -2843,7 +3083,8 @@ function App() {
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 document.getElementById("root").dataset.rendered = "1";
-root.render(<App />);
+// Erst anmelden (Chef-Code / Mitarbeiter-Code), dann die App zeigen
+Zugang.start({ app: "bestell" }).then(() => root.render(<App />));
 </script>
 <script>
   if ('serviceWorker' in navigator) {
