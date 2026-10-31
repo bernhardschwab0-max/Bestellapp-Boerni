@@ -685,6 +685,18 @@ const herstellProzentVon = (daten) => {
   return isFinite(p) && daten?.herstellProzent !== undefined && daten?.herstellProzent !== "" ? p : HERSTELL_PROZENT_STANDARD;
 };
 
+// Kalkulatorische Kosten je Backtag – keine echten Ausgaben, die Backstube soll sie aber mitverdienen.
+// Unternehmerlohn = Arbeitsstunden × Stundensatz (Stunden auch je Backtag änderbar),
+// Zinsen = eingesetztes Kapital × Zinssatz, verteilt auf die Backtage im Jahr.
+function kalkKostenTag(daten, backtag) {
+  const k = daten?.kalk || {};
+  const stunden = zahl(backtag?.stunden ?? k.stunden);
+  const stundensatz = zahl(k.stundensatz);
+  const lohn = runden2(stunden * stundensatz);
+  const zinsen = runden2((zahl(k.kapital) * zahl(k.zinssatz)) / 100 / (zahl(k.backtageJahr) || 52));
+  return { stunden, stundensatz, lohn, zinsen, summe: runden2(lohn + zinsen) };
+}
+
 // Alles zu einer Bestellung: Summe, Rabatt (= Verlust durch Rabatt), zu zahlen, Materialkosten, Deckungsbeitrag,
 // Herstellungskosten und Gewinn
 function bestellWirtschaft(b, sorten, lager, herstellProzent = HERSTELL_PROZENT_STANDARD) {
@@ -875,7 +887,7 @@ function RabattWahl({ wert, onChange, klein }) {
 
 // Kalkulation mit Rabatt (nur für Börni, kommt weder auf den Backzettel noch auf die Kundenzettel):
 // zu zahlen − Materialkosten = Deckungsbeitrag − Herstellungskosten = Gewinn
-function Wirtschaftlichkeit({ w, rabattLabel, nettoLabel = "Zu zahlen", mitRabatt }) {
+function Wirtschaftlichkeit({ w, rabattLabel, nettoLabel = "Zu zahlen", mitRabatt, kalk }) {
   const zeile = (label, wert, stil = {}) => (
     <div className="flex justify-between gap-2" style={stil}>
       <span>{label}</span>
@@ -901,6 +913,13 @@ function Wirtschaftlichkeit({ w, rabattLabel, nettoLabel = "Zu zahlen", mitRabat
       {mitHerstellung && zeile(`Herstellungskosten (${w.herstellProzent} % vom Material)`, `−${fmtEUR(w.herstell)}`, { color: COL.inkMuted })}
       {mitVerpackung && zeile("Verpackung", `−${fmtEUR(w.verpackung)}`, { color: COL.inkMuted })}
       {mitGewinn && zeile(`Gewinn${anteil(w.gewinn)}`, fmtEUR(w.gewinn), { ...strich, fontWeight: 700, fontSize: 15, color: farbe(w.gewinn) })}
+      {kalk?.summe > 0 && (
+        <>
+          {kalk.lohn > 0 && zeile(`Kalk. Unternehmerlohn (${fmtNum(kalk.stunden, 2)} h × ${fmtEUR(kalk.stundensatz)})`, `−${fmtEUR(kalk.lohn)}`, { color: COL.inkMuted })}
+          {kalk.zinsen > 0 && zeile("Kalk. Zinsen", `−${fmtEUR(kalk.zinsen)}`, { color: COL.inkMuted })}
+          {zeile(`Ergebnis nach kalk. Kosten${anteil(runden2(ergebnis - kalk.summe))}`, fmtEUR(runden2(ergebnis - kalk.summe)), { ...strich, fontWeight: 700, fontSize: 15, color: farbe(runden2(ergebnis - kalk.summe)) })}
+        </>
+      )}
       <div className="text-xs mt-1" style={{ color: farbe(ergebnis) }}>
         {ergebnis > 0
           ? rabattDa
@@ -910,6 +929,13 @@ function Wirtschaftlichkeit({ w, rabattLabel, nettoLabel = "Zu zahlen", mitRabat
           ? `⚠️ Das Material ist gedeckt, aber nicht die Herstellungskosten – Verlust ${fmtEUR(-ergebnis)}.`
           : `⚠️ Nicht einmal das Material ist gedeckt – Verlust ${fmtEUR(-ergebnis)}.`}
       </div>
+      {kalk?.summe > 0 && (
+        <div className="text-xs" style={{ color: farbe(runden2(ergebnis - kalk.summe)) }}>
+          {ergebnis - kalk.summe > 0
+            ? `✅ Unternehmerlohn und Zinsen sind verdient, darüber hinaus bleiben ${fmtEUR(runden2(ergebnis - kalk.summe))}.`
+            : `⚠️ Für Unternehmerlohn und Zinsen fehlen ${fmtEUR(runden2(kalk.summe - ergebnis))}.`}
+        </div>
+      )}
       {(w.ohnePreis.size > 0 || w.unbekannt) && (
         <div className="text-xs mt-1" style={{ color: COL.amber }}>
           {w.ohnePreis.size > 0 && <>Ohne Preis in der Lager-App (Kosten sind dadurch zu niedrig): {[...w.ohnePreis].join(", ")}. </>}
@@ -1659,7 +1685,7 @@ function DruckAnsicht({ art, setArt, backtag, sorten, kunden, lager, onClose }) 
 }
 
 // ---------- Kunden & Kassa ----------
-function KassaTab({ backtag, sorten, kunden, lager, herstellProzent, updateBacktag, onDrucken }) {
+function KassaTab({ backtag, sorten, kunden, lager, herstellProzent, kalk, stundenStandard, updateBacktag, onDrucken }) {
   const kName = (id) => kunden.find((k) => k.id === id)?.name || "(unbekannt)";
   const liste = [...(backtag.bestellungen || [])].sort((a, b) => kName(a.kundeId).localeCompare(kName(b.kundeId), "de"));
   const gesamt = liste.reduce((s, b) => s + bestellSumme(b, sorten), 0);
@@ -1712,7 +1738,21 @@ function KassaTab({ backtag, sorten, kunden, lager, herstellProzent, updateBackt
           nettoLabel="Einnahmen"
           mitRabatt={tag.rabatt > 0}
           rabattLabel={`Verlust durch Rabatte (${mitRabatt.length} Bestellung${mitRabatt.length > 1 ? "en" : ""})`}
+          kalk={kalk}
         />
+        {kalk.stundensatz > 0 && (
+          <div className="mt-2" style={{ maxWidth: 220 }}>
+            <Field label="Deine Arbeitsstunden an diesem Backtag">
+              <input
+                style={inputStyle}
+                inputMode="decimal"
+                value={backtag.stunden ?? ""}
+                placeholder={stundenStandard ? String(stundenStandard) : "z.B. 8"}
+                onChange={(e) => updateBacktag((bt) => ({ ...bt, stunden: e.target.value === "" ? undefined : e.target.value }))}
+              />
+            </Field>
+          </div>
+        )}
         <div className="text-xs mt-2" style={{ color: COL.inkMuted }}>Steht nicht auf Backzettel und Kundenzetteln.</div>
       </Card>
 
@@ -2283,6 +2323,33 @@ function EinstellungenTab({ daten, setDaten, lager, config, onReloadLager, onDis
                 <span className="text-sm">% der Materialkosten</span>
               </div>
             </div>
+            <div className="rounded-xl p-3" style={{ backgroundColor: COL.bg }}>
+              <div className="font-semibold mb-1">🧾 Kalkulatorische Kosten</div>
+              <div className="text-xs mb-2" style={{ color: COL.inkMuted }}>
+                Keine echten Ausgaben, aber die Backstube soll sie mitverdienen. Sie werden pro Backtag gerechnet und stehen unter Kunden & € beim Gewinn.
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  ["stundensatz", "Unternehmerlohn € pro Stunde", "z.B. 20"],
+                  ["stunden", "Arbeitsstunden pro Backtag", "z.B. 8"],
+                  ["kapital", "Eingesetztes Kapital €", "z.B. 10000"],
+                  ["zinssatz", "Zinssatz % im Jahr", "z.B. 4"],
+                  ["backtageJahr", "Backtage im Jahr", "52"],
+                ].map(([k, l, ph]) => (
+                  <Field key={k} label={l}>
+                    <input style={{ ...inputStyle, width: "100%" }} inputMode="decimal" value={daten.kalk?.[k] ?? ""} placeholder={ph} onChange={(e) => setDaten((d) => ({ ...d, kalk: { ...(d.kalk || {}), [k]: e.target.value } }))} />
+                  </Field>
+                ))}
+              </div>
+              {(() => {
+                const k = kalkKostenTag(daten, null);
+                return k.summe > 0 ? (
+                  <div className="text-sm mt-2">
+                    Pro Backtag: Unternehmerlohn <b>{fmtEUR(k.lohn)}</b> + Zinsen <b>{fmtEUR(k.zinsen)}</b> = <b>{fmtEUR(k.summe)}</b>
+                  </div>
+                ) : null;
+              })()}
+            </div>
             <div>💾 Speicher belegt: <b>{fmtNum(groesse / 1024)} kb</b> von 100 kb (die letzten {MAX_BACKTAGE} Backtage werden aufgehoben)</div>
             <div className="text-sm" style={{ color: COL.inkMuted }}>📱 Neue Geräte richtest du unter <b>👤 Mitarbeiter → Geräte einrichten</b> ein (für dich oder für Mitarbeiter).</div>
             <a href={LAGER_APP_URL} className="underline" style={{ color: COL.accent }}>→ Zur Lager-App</a>
@@ -2413,6 +2480,7 @@ function bestellAenderungen(alt, neu) {
   });
   altS.forEach((s, id) => { if (!neuS.has(id)) zeilen.push(`Sorte gelöscht: ${s.kurz}`); });
   if (JSON.stringify(alt.herstellProzent) !== JSON.stringify(neu.herstellProzent)) zeilen.push(`Herstellungskosten: ${neu.herstellProzent} % der Materialkosten`);
+  if (JSON.stringify(alt.kalk) !== JSON.stringify(neu.kalk)) zeilen.push("Kalkulatorische Kosten geändert");
   return zeilen;
 }
 // Gleiche Sätze innerhalb von 3 Minuten nur einmal (z. B. beim Tippen in einem Namensfeld)
@@ -3055,7 +3123,7 @@ function App() {
         ) : tab === "expedit" || !chef ? (
           <ExpeditTab backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} updateBacktag={updateBacktag} />
         ) : (
-          <KassaTab backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} lager={lager} herstellProzent={herstellProzentVon(daten)} updateBacktag={updateBacktag} onDrucken={setDruck} />
+          <KassaTab backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} lager={lager} herstellProzent={herstellProzentVon(daten)} kalk={kalkKostenTag(daten, backtag)} stundenStandard={daten.kalk?.stunden} updateBacktag={updateBacktag} onDrucken={setDruck} />
         )}
 
         <nav className="sm:hidden bottom-nav no-print fixed bottom-0 left-0 right-0 z-20 flex justify-around px-2 pt-2" style={{ backgroundColor: "rgba(255,255,255,0.95)", backdropFilter: "blur(10px)", borderTop: `1px solid ${COL.line}` }}>
