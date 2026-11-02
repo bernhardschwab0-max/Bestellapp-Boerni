@@ -494,6 +494,11 @@ function berechneBackzettel(backtag, sorten, lager) {
   (backtag?.bestellungen || []).forEach((b) =>
     Object.entries(b.items || {}).forEach(([sid, q]) => stueck.set(sid, (stueck.get(sid) || 0) + (Number(q) || 0)))
   );
+  // Freier Verkauf wird mitgebacken
+  Object.entries(backtag?.frei || {}).forEach(([sid, f]) => {
+    const q = zahl(f?.menge);
+    if (q > 0) stueck.set(sid, (stueck.get(sid) || 0) + q);
+  });
   const proSorte = sorten
     .filter((s) => (stueck.get(s.id) || 0) > 0)
     .map((s) => ({ sorte: s, stueck: stueck.get(s.id) }));
@@ -619,10 +624,17 @@ function preisFuer(s, kundeId) {
   const sonder = kundeId ? zahl(s?.sonderpreise?.[kundeId]) : 0;
   return sonder > 0 ? sonder : Number(s?.preis) || 0;
 }
+// Retouren werden gutgeschrieben (Börni 02.11.2026): bezahlt wird nur, was der Kunde verkauft hat.
+// b.retoure[sorteId] = zurückgegebene Stück (höchstens so viel wie bestellt)
+const retoureVon = (b, sid) => Math.min(Number(b?.items?.[sid]) || 0, zahl(b?.retoure?.[sid]));
+const verkauftVon = (b, sid) => (Number(b?.items?.[sid]) || 0) - retoureVon(b, sid);
+function bestellRetoureWert(b, sorten) {
+  return runden2(Object.keys(b?.retoure || {}).reduce((s, sid) => s + retoureVon(b, sid) * preisFuer(sorten.find((x) => x.id === sid), b.kundeId), 0));
+}
 function bestellBrutto(b, sorten) {
-  return Object.entries(b.items || {}).reduce((s, [sid, q]) => {
+  return Object.keys(b.items || {}).reduce((s, sid) => {
     const so = sorten.find((x) => x.id === sid);
-    return s + (Number(q) || 0) * preisFuer(so, b.kundeId);
+    return s + verkauftVon(b, sid) * preisFuer(so, b.kundeId);
   }, 0);
 }
 function bestellRabatt(b, sorten) {
@@ -731,9 +743,45 @@ function bestellWirtschaft(b, sorten, lager, herstellProzent = HERSTELL_PROZENT_
     verpackung, // eigene Verpackung je Sorte (z.B. Sackerl + Schleife bei den Cookies)
     gewinn: runden2(netto - kosten - herstell - verpackung),
     gewinnOhneRabatt: runden2(brutto - kosten - herstell - verpackung),
+    retoureWert: bestellRetoureWert(b, sorten), // gutgeschrieben (Material ist trotzdem verbraucht)
+    bestellt: runden2(brutto + bestellRetoureWert(b, sorten)),
     ohnePreis,
     unbekannt,
   };
+}
+
+// Freier Verkauf eines Backtags: frei[sorteId] = { menge: produziert, uebrig: am Ende übrig } – verkauft = Menge − Übrig
+const freiUebrig = (f) => (f?.uebrig === undefined || f?.uebrig === null || f?.uebrig === "" ? null : Math.min(zahl(f.menge), zahl(f.uebrig)));
+function freiWirtschaft(backtag, sorten, lager, herstellProzent = HERSTELL_PROZENT_STANDARD) {
+  let brutto = 0;
+  let kosten = 0;
+  let verpackung = 0;
+  let stueck = 0;
+  let verkauft = 0;
+  let offen = false;
+  const ohnePreis = new Set();
+  let unbekannt = false;
+  Object.entries(backtag?.frei || {}).forEach(([sid, f]) => {
+    const so = sorten.find((x) => x.id === sid);
+    const menge = zahl(f?.menge);
+    if (!so || menge <= 0) return;
+    const uebrig = freiUebrig(f);
+    if (uebrig === null) offen = true;
+    stueck += menge;
+    verkauft += menge - (uebrig || 0);
+    brutto += (menge - (uebrig || 0)) * (Number(so.preis) || 0);
+    const k = stueckKosten(so, lager);
+    kosten += menge * k.kosten;
+    verpackung += menge * zahl(so.verpackung);
+    k.ohnePreis.forEach((n) => ohnePreis.add(n));
+    if (k.unbekannt) unbekannt = true;
+  });
+  brutto = runden2(brutto);
+  kosten = runden2(kosten);
+  verpackung = runden2(verpackung);
+  const herstell = runden2((kosten * (Number(herstellProzent) || 0)) / 100);
+  const gewinn = runden2(brutto - kosten - herstell - verpackung);
+  return { brutto, rabatt: 0, netto: brutto, kosten, db: runden2(brutto - kosten), herstell, verpackung, gewinn, gewinnOhneRabatt: gewinn, retoureWert: 0, bestellt: brutto, stueck, verkauft, offen, ohnePreis, unbekannt };
 }
 const fmtProzent = (n) => (isFinite(n) ? `${Math.round(n)} %` : "–");
 function bestellText(b, sorten) {
@@ -905,7 +953,9 @@ function Wirtschaftlichkeit({ w, rabattLabel, nettoLabel = "Zu zahlen", mitRabat
   const farbe = (n) => (n > 0 ? COL.ok : COL.warn);
   return (
     <div className="rounded-xl p-3 text-sm flex flex-col gap-1" style={{ backgroundColor: COL.bg }}>
-      {zeile("Summe ohne Rabatt", fmtEUR(w.brutto))}
+      {w.retoureWert > 0 && zeile("Bestellt", fmtEUR(w.bestellt))}
+      {w.retoureWert > 0 && zeile("Retoure (gutgeschrieben)", `−${fmtEUR(w.retoureWert)}`, { color: COL.warn })}
+      {zeile(w.retoureWert > 0 ? "Verkauft, ohne Rabatt" : "Summe ohne Rabatt", fmtEUR(w.brutto))}
       {rabattDa && zeile(rabattLabel || `Rabatt ${w.rabattProzent} % = dein Verlust`, `−${fmtEUR(w.rabatt)}`, { color: COL.warn })}
       {zeile(nettoLabel, fmtEUR(w.netto), { fontWeight: 700 })}
       {zeile("Materialkosten", `−${fmtEUR(w.kosten)}`, { color: COL.inkMuted })}
@@ -1168,21 +1218,367 @@ function BestellungenTab({ nurLesen, backtag, sorten, kunden, lager, herstellPro
 }
 
 // ---------- Backzettel ----------
-function BackzettelTab({ chef, backtag, sorten, lager, onUebergeben, onReloadLager, onDrucken }) {
+// ---------- Planer für den freien Verkauf ("Bot") ----------
+// Vorschlag je Sorte: Ø verkauft an vergleichbaren Backtagen (Menge − Übrig; ausverkauft = mehr wäre gegangen)
+// × Ereignisse (Feiertage, Weihnachten, Ostern …) × Wetter an den Verkaufstagen, aufgerundet auf ganze Chargen.
+// Börni backt Di für Mi + Do – was länger hält, deckt mehrere Verkaufstage ab.
+const PLANER_FAKTOREN = [
+  { key: "vortagFeiertag", name: "Tag vor einem Feiertag", standard: 20 },
+  { key: "weihnachten", name: "Weihnachten (18.–24.12.)", standard: 30 },
+  { key: "nikolaus", name: "Nikolaus (4.–6.12.)", standard: 10 },
+  { key: "ostern", name: "Ostern (Gründonnerstag–Karsamstag)", standard: 20 },
+  { key: "allerheiligen", name: "Allerheiligen (28.–31.10.)", standard: 10 },
+  { key: "fasching", name: "Fasching (Sa–Faschingsdienstag)", standard: 0 },
+  { key: "muttertag", name: "Muttertag (Fr–Sa davor)", standard: 0 },
+  { key: "regen", name: "Regen am Verkaufstag", standard: -10 },
+  { key: "hitze", name: "Hitze ab 28 °C", standard: -10 },
+  { key: "ausverkauft", name: "Ausverkauft (mehr wäre gegangen)", standard: 10 },
+];
+const PLANER_EREIGNISSE = PLANER_FAKTOREN.filter((f) => !["regen", "hitze", "ausverkauft"].includes(f.key));
+const planerFaktor = (planer, sorte, key) => {
+  const eigen = sorte?.ereignisse?.[key];
+  if (eigen !== undefined && eigen !== "") return zahl(eigen);
+  const p = planer?.faktoren?.[key];
+  if (p !== undefined && p !== "") return zahl(p);
+  return PLANER_FAKTOREN.find((f) => f.key === key)?.standard || 0;
+};
+// Ostersonntag (Gauß, gregorianisch)
+function ostersonntag(j) {
+  const a = j % 19, b = Math.floor(j / 100), c = j % 100, d = Math.floor(b / 4), e = b % 4;
+  const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const monat = Math.floor((h + l - 7 * m + 114) / 31), tag = ((h + l - 7 * m + 114) % 31) + 1;
+  return `${j}-${String(monat).padStart(2, "0")}-${String(tag).padStart(2, "0")}`;
+}
+// Gesetzliche Feiertage in Österreich
+function feiertageAT(j) {
+  const o = ostersonntag(j);
+  const f = new Map([
+    [`${j}-01-01`, "Neujahr"], [`${j}-01-06`, "Heilige Drei Könige"], [plusTage(o, 1), "Ostermontag"], [`${j}-05-01`, "Staatsfeiertag"],
+    [plusTage(o, 39), "Christi Himmelfahrt"], [plusTage(o, 50), "Pfingstmontag"], [plusTage(o, 60), "Fronleichnam"], [`${j}-08-15`, "Mariä Himmelfahrt"],
+    [`${j}-10-26`, "Nationalfeiertag"], [`${j}-11-01`, "Allerheiligen"], [`${j}-12-08`, "Mariä Empfängnis"], [`${j}-12-25`, "Christtag"], [`${j}-12-26`, "Stefanitag"],
+  ]);
+  return f;
+}
+const feiertagName = (iso) => feiertageAT(Number(iso.slice(0, 4))).get(iso) || "";
+// Ereignisse, die einen Verkaufstag betreffen
+function ereignisseAm(iso) {
+  const j = Number(iso.slice(0, 4));
+  const md = iso.slice(5);
+  const o = ostersonntag(j);
+  const zwischen = (von, bis) => iso >= von && iso <= bis;
+  const aus = [];
+  if (feiertagName(iso)) aus.push({ key: "feiertag", name: `${feiertagName(iso)} (Feiertag – verkaufst du da?)`, hinweis: true });
+  const morgen = feiertagName(plusTage(iso, 1));
+  if (morgen) aus.push({ key: "vortagFeiertag", name: `vor ${morgen}` });
+  if (md >= "12-18" && md <= "12-24") aus.push({ key: "weihnachten", name: "Weihnachten" });
+  if (md >= "12-04" && md <= "12-06") aus.push({ key: "nikolaus", name: "Nikolaus" });
+  if (zwischen(plusTage(o, -3), plusTage(o, -1))) aus.push({ key: "ostern", name: "Ostern" });
+  if (md >= "10-28" && md <= "10-31") aus.push({ key: "allerheiligen", name: "Allerheiligen" });
+  if (zwischen(plusTage(o, -50), plusTage(o, -47))) aus.push({ key: "fasching", name: "Fasching" });
+  // Muttertag = 2. Sonntag im Mai
+  const mai1 = new Date(`${j}-05-01T12:00:00`).getDay();
+  const muttertag = `${j}-05-${String(1 + ((7 - mai1) % 7) + 7).padStart(2, "0")}`;
+  if (zwischen(plusTage(muttertag, -2), plusTage(muttertag, -1))) aus.push({ key: "muttertag", name: "Muttertag" });
+  return aus;
+}
+
+// Wetter von Open-Meteo (kostenlos, ohne Anmeldung) – nur der eingestellte Ort wird abgefragt
+const wetterSpeicher = new Map();
+async function wetterLaden(ort) {
+  if (!ort?.lat || !ort?.lon) return null;
+  const key = `${ort.lat},${ort.lon}`;
+  const alt = wetterSpeicher.get(key);
+  if (alt && Date.now() - alt.zeit < 3 * 3600 * 1000) return alt.tage;
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${ort.lat}&longitude=${ort.lon}&daily=temperature_2m_max,precipitation_sum,precipitation_probability_max&timezone=Europe%2FVienna&forecast_days=14`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Wetter nicht erreichbar");
+  const d = (await res.json()).daily || {};
+  const tage = {};
+  (d.time || []).forEach((t, i) => {
+    tage[t] = { tmax: d.temperature_2m_max?.[i], regenMm: d.precipitation_sum?.[i], regenProz: d.precipitation_probability_max?.[i] };
+  });
+  wetterSpeicher.set(key, { zeit: Date.now(), tage });
+  return tage;
+}
+const istRegen = (w) => !!w && ((w.regenMm ?? 0) >= 2 || (w.regenProz ?? 0) >= 70);
+const istHitze = (w) => !!w && (w.tmax ?? 0) >= 28;
+const wetterKurz = (w) => (w ? `${Math.round(w.tmax)} °C${istRegen(w) ? ` · 🌧 ${fmtNum(w.regenMm || 0)} mm` : w.regenProz >= 40 ? ` · 🌦 ${w.regenProz} %` : " · ☀️"}` : "noch keine Vorhersage");
+
+function planerVorschlag({ sorte, backtag, backtage, planer, wetter }) {
+  const verkaufstage = Math.max(1, Math.round(zahl(planer?.verkaufstage) || 2));
+  const haltbar = Math.max(1, Math.round(zahl(sorte.haltbar) || 1));
+  const tage = Array.from({ length: Math.min(verkaufstage, haltbar) }, (_, i) => plusTage(backtag.datum, i + 1));
+  const gruende = [];
+  const hinweise = [];
+  if (haltbar < verkaufstage) {
+    const rest = Array.from({ length: verkaufstage - haltbar }, (_, i) => WOCHENTAGE[new Date(plusTage(backtag.datum, haltbar + i + 1) + "T12:00:00").getDay()]);
+    hinweise.push(`hält nur ${haltbar} Tag${haltbar > 1 ? "e" : ""} – für ${rest.join(" + ")} extra backen`);
+  }
+  // Verlauf: frühere Backtage mit eingetragenem "Übrig"
+  const frueher = backtage
+    .filter((bt) => bt.datum < backtag.datum && zahl(bt.frei?.[sorte.id]?.menge) > 0 && freiUebrig(bt.frei[sorte.id]) !== null)
+    .sort((a, b) => b.datum.localeCompare(a.datum));
+  const wtag = new Date(backtag.datum + "T12:00:00").getDay();
+  let auswahl = frueher.filter((bt) => new Date(bt.datum + "T12:00:00").getDay() === wtag).slice(0, 4);
+  const gleicherTag = auswahl.length >= 2;
+  if (!gleicherTag) auswahl = frueher.slice(0, 4);
+  if (!auswahl.length) return { ohneDaten: true, tage, gruende, hinweise };
+  const plusAus = planerFaktor(planer, sorte, "ausverkauft");
+  let ausverkauft = 0;
+  const werte = auswahl.map((bt) => {
+    const f = bt.frei[sorte.id];
+    const m = zahl(f.menge);
+    const u = freiUebrig(f);
+    if (u === 0) {
+      ausverkauft++;
+      return m * (1 + plusAus / 100);
+    }
+    return m - u;
+  });
+  const basis = werte.reduce((s, v) => s + v, 0) / werte.length;
+  gruende.push(`Ø ${fmtNum(basis)} verkauft (letzte ${auswahl.length} ${gleicherTag ? WOCHENTAGE[wtag] + "-Backtage" : "Backtage"})`);
+  if (ausverkauft) gruende.push(`${ausverkauft}× ausverkauft → +${plusAus} % eingerechnet`);
+  let faktor = 1;
+  // Ereignisse an den Verkaufstagen (jedes nur einmal)
+  const ereignisse = new Map();
+  tage.forEach((d) => ereignisseAm(d).forEach((e) => ereignisse.set(e.key, e)));
+  ereignisse.forEach((e) => {
+    if (e.hinweis) return hinweise.push(e.name);
+    const p = planerFaktor(planer, sorte, e.key);
+    if (p) {
+      faktor *= 1 + p / 100;
+      gruende.push(`${e.name} ${p > 0 ? "+" : ""}${p} %`);
+    }
+  });
+  // Wetter: Mittel über die Verkaufstage
+  if (wetter) {
+    const proTag = tage.map((d) => wetter[d]).filter(Boolean);
+    if (proTag.length) {
+      const p = proTag.reduce((s, w) => s + (istRegen(w) ? planerFaktor(planer, sorte, "regen") : 0) + (istHitze(w) ? planerFaktor(planer, sorte, "hitze") : 0), 0) / tage.length;
+      if (Math.round(p)) {
+        faktor *= 1 + p / 100;
+        gruende.push(`Wetter ${p > 0 ? "+" : ""}${Math.round(p)} %`);
+      }
+    }
+  }
+  const roh = basis * faktor;
+  const charge = Math.max(1, zahl(sorte.charge) || 1);
+  const menge = charge > 1 ? Math.ceil(roh / charge - 1e-9) * charge : Math.round(roh);
+  if (charge > 1) gruende.push(`auf ganze Chargen (${charge} Stück) aufgerundet`);
+  return { menge: Math.max(0, menge), roh, tage, gruende, hinweise };
+}
+
+// Einstellungen des Planers: Ort fürs Wetter, Verkaufstage, Zu- und Abschläge
+function PlanerEinstellungen({ daten, setDaten }) {
+  const p = daten.planer || {};
+  const [suche, setSuche] = useState("");
+  const [treffer, setTreffer] = useState(null);
+  const [fehler, setFehler] = useState("");
+  const setP = (patch) => setDaten((d) => ({ ...d, planer: { ...(d.planer || {}), ...patch } }));
+  const suchen = async () => {
+    setFehler("");
+    setTreffer(null);
+    try {
+      const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(suche.trim())}&count=5&language=de&format=json&countryCode=AT`);
+      const r = (await res.json()).results || [];
+      if (!r.length) setFehler("Ort nicht gefunden");
+      else setTreffer(r);
+    } catch (e) {
+      setFehler("Ortssuche nicht erreichbar");
+    }
+  };
+  return (
+    <div className="rounded-xl p-3" style={{ backgroundColor: COL.bg }}>
+      <div className="font-semibold mb-1">🤖 Planer für den freien Verkauf</div>
+      <div className="text-xs mb-2" style={{ color: COL.inkMuted }}>
+        Steht im Backzettel. Er schlägt Mengen vor – aus dem, was an früheren Backtagen verkauft wurde, plus Feiertage, Ereignisse und Wetter. Die Prozente sind Startwerte, pass sie deiner Erfahrung an (bei einzelnen Sorten unter Sorten → „+ Planer-Zuschlag“).
+      </div>
+      <div className="text-sm mb-1">Ort fürs Wetter: <b>{p.ort?.name || "noch keiner"}</b></div>
+      <div className="flex flex-wrap gap-2 items-center mb-1">
+        <input style={{ ...inputStyle, flex: "1 1 160px", minWidth: 0 }} value={suche} placeholder="z.B. Wiener Neustadt" onChange={(e) => setSuche(e.target.value)} onKeyDown={(e) => e.key === "Enter" && suche.trim() && suchen()} />
+        <Btn small onClick={suchen} disabled={!suche.trim()}>Suchen</Btn>
+      </div>
+      {fehler && <div className="text-xs" style={{ color: COL.warn }}>{fehler}</div>}
+      {treffer && (
+        <div className="flex flex-col gap-1 mb-2">
+          {treffer.map((t) => (
+            <button
+              key={t.id}
+              className="text-left text-sm underline"
+              style={{ color: COL.accent }}
+              onClick={() => {
+                setP({ ort: { name: [t.name, t.admin1].filter(Boolean).join(", "), lat: Math.round(t.latitude * 100) / 100, lon: Math.round(t.longitude * 100) / 100 } });
+                setTreffer(null);
+                setSuche("");
+              }}
+            >
+              {[t.name, t.admin2, t.admin1, t.country].filter(Boolean).join(", ")}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="text-xs mb-2" style={{ color: COL.inkMuted }}>Für das Wetter wird nur dieser Ort an Open-Meteo geschickt (kostenlos, ohne Anmeldung).</div>
+      <div className="flex flex-wrap items-center gap-2 text-sm mb-3">
+        Verkauft wird an
+        {[1, 2, 3].map((n) => {
+          const on = Math.round(zahl(p.verkaufstage) || 2) === n;
+          return (
+            <button key={n} onClick={() => setP({ verkaufstage: n })} className="text-sm font-semibold px-3 py-1.5 rounded-full" style={{ backgroundColor: on ? COL.accent : COL.surface, color: on ? "#fff" : COL.ink, border: `1px solid ${on ? COL.accent : COL.line}` }}>
+              {n}
+            </button>
+          );
+        })}
+        Tag{Math.round(zahl(p.verkaufstage) || 2) > 1 ? "en" : ""} nach dem Backtag
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
+        {PLANER_FAKTOREN.map((f) => (
+          <label key={f.key} className="flex items-center justify-between gap-2 text-sm">
+            <span className="min-w-0">{f.name}</span>
+            <span className="flex items-center gap-1 shrink-0">
+              <input style={{ ...inputStyle, width: 64 }} inputMode="decimal" value={p.faktoren?.[f.key] ?? ""} placeholder={String(f.standard)} onChange={(e) => setP({ faktoren: { ...(p.faktoren || {}), [f.key]: e.target.value } })} />
+              %
+            </span>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Karte im Backzettel: Mengen für den freien Verkauf eintragen, Vorschlag des Planers, am Ende "Übrig"
+function FreiVerkaufKarte({ chef, backtag, backtage, sorten, planer, updateBacktag }) {
+  const [wetter, setWetter] = useState(null);
+  const [wetterFehler, setWetterFehler] = useState("");
+  const [warum, setWarum] = useState(null);
+  const ort = planer?.ort;
+  useEffect(() => {
+    let weg = false;
+    setWetterFehler("");
+    if (ort?.lat) wetterLaden(ort).then((w) => !weg && setWetter(w)).catch((e) => !weg && setWetterFehler(e.message));
+    return () => { weg = true; };
+  }, [ort?.lat, ort?.lon]);
+
+  const verkaufstage = Math.max(1, Math.round(zahl(planer?.verkaufstage) || 2));
+  const tage = Array.from({ length: verkaufstage }, (_, i) => plusTage(backtag.datum, i + 1));
+  const frei = backtag.frei || {};
+  // Sorten: alles, was hier oder früher frei verkauft wurde, plus selbst dazugenommene
+  const ids = new Set([...Object.keys(frei), ...backtage.flatMap((bt) => Object.keys(bt.frei || {}))]);
+  const liste = sorten.filter((s) => ids.has(s.id));
+  const andere = sorten.filter((s) => s.aktiv && !ids.has(s.id));
+  const vorschlaege = Object.fromEntries(liste.map((s) => [s.id, planerVorschlag({ sorte: s, backtag, backtage, planer, wetter })]));
+  const setzen = (sid, feld, wert) =>
+    updateBacktag((bt) => {
+      const f = { ...(bt.frei || {}) };
+      f[sid] = { ...(f[sid] || {}), [feld]: wert };
+      return { ...bt, frei: f };
+    });
+  const alleUebernehmen = () =>
+    updateBacktag((bt) => {
+      const f = { ...(bt.frei || {}) };
+      liste.forEach((s) => {
+        const v = vorschlaege[s.id];
+        if (v && !v.ohneDaten) f[s.id] = { ...(f[s.id] || {}), menge: String(v.menge) };
+      });
+      return { ...bt, frei: f };
+    });
+
+  return (
+    <Card>
+      <H2>🛒 Freier Verkauf & Planer</H2>
+      <p className="text-xs -mt-2 mb-3" style={{ color: COL.inkMuted }}>
+        Backtag {fmtDatum(backtag.datum)} · verkauft wird {tage.map((d) => WOCHENTAGE[new Date(d + "T12:00:00").getDay()]).join(" + ")}. „Menge“ wird mitgebacken (steht im Backzettel), „Übrig“ am Ende eintragen – daraus lernt der Planer.
+      </p>
+      <div className="flex flex-wrap gap-2 mb-3 text-xs">
+        {tage.map((d) => (
+          <span key={d} className="px-2 py-1 rounded-full" style={{ backgroundColor: COL.bg }}>
+            {fmtDatum(d).slice(0, 9)}: {ort?.lat ? wetterKurz(wetter?.[d]) : "Wetter: Ort fehlt"}
+            {ereignisseAm(d).map((e) => ` · ${e.name}`).join("")}
+          </span>
+        ))}
+      </div>
+      {!ort?.lat && chef && <p className="text-xs mb-2" style={{ color: COL.amber }}>Für das Wetter unter Einstellungen → App → 🤖 Planer deinen Ort eintragen.</p>}
+      {wetterFehler && <p className="text-xs mb-2" style={{ color: COL.warn }}>⚠️ {wetterFehler}</p>}
+      {liste.length === 0 && <p className="text-sm mb-2" style={{ color: COL.inkMuted }}>Noch keine Sorte im freien Verkauf.</p>}
+      <div className="flex flex-col gap-2">
+        {liste.map((s) => {
+          const v = vorschlaege[s.id];
+          const f = frei[s.id] || {};
+          return (
+            <div key={s.id} className="rounded-xl p-2.5" style={{ backgroundColor: COL.bg }}>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-semibold min-w-0" style={{ flex: "1 1 120px" }}>
+                  {s.kurz} <span className="text-xs font-normal" style={{ color: COL.inkMuted }}>{s.name !== s.kurz ? s.name : ""}</span>
+                </span>
+                <button onClick={() => setWarum(warum === s.id ? null : s.id)} className="text-xs px-2 py-1 rounded-full" style={{ backgroundColor: COL.accentSoft, color: COL.accent }}>
+                  🤖 {v.ohneDaten ? "noch keine Daten" : `Vorschlag ${fmtQty(v.menge)}`}
+                </button>
+                <label className="flex items-center gap-1 text-xs">
+                  Menge
+                  <input style={{ ...inputStyle, width: 62 }} inputMode="decimal" value={f.menge ?? ""} placeholder={v.ohneDaten ? "" : String(v.menge)} disabled={!chef} onChange={(e) => setzen(s.id, "menge", e.target.value)} />
+                </label>
+                <label className="flex items-center gap-1 text-xs">
+                  Übrig
+                  <input style={{ ...inputStyle, width: 62 }} inputMode="decimal" value={f.uebrig ?? ""} placeholder="–" onChange={(e) => setzen(s.id, "uebrig", e.target.value)} />
+                </label>
+              </div>
+              {warum === s.id && (
+                <div className="text-xs mt-2 flex flex-col gap-0.5" style={{ color: COL.inkMuted }}>
+                  {v.ohneDaten ? <span>Sobald du an einem Backtag Menge und Übrig eingetragen hast, rechnet der Planer mit.</span> : v.gruende.map((g) => <span key={g}>• {g}</span>)}
+                  {v.hinweise.map((h) => <span key={h} style={{ color: COL.amber }}>⚠️ {h}</span>)}
+                  {chef && !v.ohneDaten && (
+                    <button onClick={() => setzen(s.id, "menge", String(v.menge))} className="underline w-fit mt-1" style={{ color: COL.accent }}>
+                      {fmtQty(v.menge)} übernehmen
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {chef && (
+        <div className="flex flex-wrap items-center gap-2 mt-3">
+          {liste.some((s) => !vorschlaege[s.id].ohneDaten) && <Btn small primary onClick={alleUebernehmen}>🤖 Alle Vorschläge übernehmen</Btn>}
+          {andere.length > 0 && (
+            <select style={{ ...inputStyle, width: "auto" }} value="" onChange={(e) => e.target.value && setzen(e.target.value, "menge", "")}>
+              <option value="">+ Sorte für freien Verkauf …</option>
+              {andere.map((s) => <option key={s.id} value={s.id}>{s.kurz} – {s.name}</option>)}
+            </select>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function BackzettelTab({ chef, backtag, backtage, sorten, lager, planer, updateBacktag, onUebergeben, onReloadLager, onDrucken }) {
   const bz = useMemo(() => berechneBackzettel(backtag, sorten, lager), [backtag, sorten, lager]);
   const [offen, setOffen] = useState({});
   const umsatz = (backtag.bestellungen || []).reduce((s, b) => s + bestellSumme(b, sorten), 0);
   const matName = (id) => lager?.materials?.find((m) => m.id === id)?.name || "?";
+  const freiKarte = <FreiVerkaufKarte chef={chef} backtag={backtag} backtage={backtage || []} sorten={sorten} planer={planer} updateBacktag={updateBacktag} />;
 
   if (!lager) {
-    return <Card><p className="text-sm" style={{ color: COL.warn }}>Rezepte aus der Lager-App konnten nicht geladen werden. <button className="underline" onClick={onReloadLager}>Nochmal versuchen</button></p></Card>;
+    return (
+      <div className="flex flex-col gap-4">
+        {freiKarte}
+        <Card><p className="text-sm" style={{ color: COL.warn }}>Rezepte aus der Lager-App konnten nicht geladen werden. <button className="underline" onClick={onReloadLager}>Nochmal versuchen</button></p></Card>
+      </div>
+    );
   }
   if (bz.proSorte.length === 0) {
-    return <Card><p className="text-sm text-center py-8" style={{ color: COL.inkMuted }}>📋 Der Backzettel entsteht automatisch, sobald Bestellungen eingetragen sind.</p></Card>;
+    return (
+      <div className="flex flex-col gap-4">
+        {freiKarte}
+        <Card><p className="text-sm text-center py-8" style={{ color: COL.inkMuted }}>📋 Der Backzettel entsteht automatisch, sobald Bestellungen oder Mengen für den freien Verkauf eingetragen sind.</p></Card>
+      </div>
+    );
   }
 
   return (
     <div className="flex flex-col gap-4">
+      {freiKarte}
 
       <div className={`grid ${chef ? "grid-cols-3" : "grid-cols-2"} gap-2`}>
         {[["🥖", fmtNum(bz.stueckGesamt), "Stück"], ["⚖️", fmtG(bz.teigGesamt), "Teig"], ...(chef ? [["💶", fmtEUR(umsatz), "Umsatz"]] : [])].map(([e, v, l]) => (
@@ -1537,6 +1933,12 @@ function KundenzettelDruck({ backtag, sorten, kunden, mitPreisen }) {
               </tbody>
             </table>
             {b.notiz && <div style={{ fontStyle: "italic", fontSize: "9pt", marginTop: 4 }}>📝 {b.notiz}</div>}
+            {mitPreisen && bestellRetoureWert(b, sorten) > 0 && (
+              <div className="flex justify-between" style={{ marginTop: 6, fontSize: "9.5pt" }}>
+                <span>Retoure: {sorten.filter((s) => retoureVon(b, s.id) > 0).map((s) => `${fmtQty(retoureVon(b, s.id))}× ${s.kurz}`).join(", ")}</span>
+                <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>−{fmtEUR(bestellRetoureWert(b, sorten))}</span>
+              </div>
+            )}
             {mitPreisen && Number(b.rabatt) > 0 && (
               <div style={{ marginTop: 6, fontSize: "9.5pt" }}>
                 <div className="flex justify-between"><span>Summe</span><span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtEUR(bestellBrutto(b, sorten))}</span></div>
@@ -1693,25 +2095,41 @@ function KassaTab({ backtag, sorten, kunden, lager, herstellProzent, kalk, stund
   const toggle = (b) => updateBacktag((bt) => ({ ...bt, bestellungen: bt.bestellungen.map((x) => (x.id === b.id ? { ...x, bezahlt: !x.bezahlt } : x)) }));
   const setzeRabatt = (b, r) => updateBacktag((bt) => ({ ...bt, bestellungen: bt.bestellungen.map((x) => (x.id === b.id ? { ...x, rabatt: r } : x)) }));
   const [rabattOffen, setRabattOffen] = useState(null);
+  const [retoureOffen, setRetoureOffen] = useState(null);
+  const setzeRetoure = (b, sid, wert) =>
+    updateBacktag((bt) => ({
+      ...bt,
+      bestellungen: bt.bestellungen.map((x) => {
+        if (x.id !== b.id) return x;
+        const retoure = { ...(x.retoure || {}) };
+        const q = Math.min(Number(x.items?.[sid]) || 0, Math.max(0, zahl(wert)));
+        if (q > 0) retoure[sid] = q;
+        else delete retoure[sid];
+        return { ...x, retoure };
+      }),
+    }));
 
-  // Auswertung für den ganzen Backtag
+  // Auswertung für den ganzen Backtag (Bestellungen + freier Verkauf)
   const wListe = useMemo(() => liste.map((b) => ({ b, w: bestellWirtschaft(b, sorten, lager, herstellProzent) })), [liste, sorten, lager, herstellProzent]);
-  const summe = (f) => runden2(wListe.reduce((s, x) => s + x.w[f], 0));
+  const frei = useMemo(() => freiWirtschaft(backtag, sorten, lager, herstellProzent), [backtag, sorten, lager, herstellProzent]);
+  const summe = (f) => runden2(wListe.reduce((s, x) => s + x.w[f], 0) + (frei[f] || 0));
   const mitRabatt = wListe.filter((x) => x.w.rabattProzent > 0);
   const tag = {
     brutto: summe("brutto"), rabatt: summe("rabatt"), netto: summe("netto"), kosten: summe("kosten"), db: summe("db"),
     herstell: summe("herstell"), verpackung: summe("verpackung"), gewinn: summe("gewinn"), gewinnOhneRabatt: summe("gewinnOhneRabatt"),
-    herstellProzent: Number(herstellProzent) || 0, rabattProzent: 0, ohnePreis: new Set(wListe.flatMap((x) => [...x.w.ohnePreis])), unbekannt: wListe.some((x) => x.w.unbekannt),
+    retoureWert: summe("retoureWert"), bestellt: summe("bestellt"),
+    herstellProzent: Number(herstellProzent) || 0, rabattProzent: 0, ohnePreis: new Set([...wListe.flatMap((x) => [...x.w.ohnePreis]), ...frei.ohnePreis]), unbekannt: wListe.some((x) => x.w.unbekannt) || frei.unbekannt,
   };
 
   const waLink = (b) => {
     const zeilen = sorten.filter((s) => (b.items[s.id] || 0) > 0).map((s) => `${fmtQty(b.items[s.id])}× ${s.name} (${fmtEUR(b.items[s.id] * preisFuer(s, b.kundeId))})`);
+    const retoureZeilen = bestellRetoureWert(b, sorten) > 0 ? `\nRetoure: ${sorten.filter((s) => retoureVon(b, s.id) > 0).map((s) => `${fmtQty(retoureVon(b, s.id))}× ${s.name}`).join(", ")} (−${fmtEUR(bestellRetoureWert(b, sorten))})` : "";
     const rabattZeilen = Number(b.rabatt) > 0 ? `\nSumme: ${fmtEUR(bestellBrutto(b, sorten))}\nRabatt ${b.rabatt} %: −${fmtEUR(bestellRabatt(b, sorten))}` : "";
-    const text = `Hallo ${kName(b.kundeId).split(" ")[0]}! 🍞\nDeine Bestellung für ${fmtDatum(backtag.datum)}:\n${zeilen.join("\n")}${rabattZeilen}\nZu zahlen: ${fmtEUR(bestellSumme(b, sorten))}\n\nLiebe Grüße, Börni's Backstube`;
+    const text = `Hallo ${kName(b.kundeId).split(" ")[0]}! 🍞\nDeine Bestellung für ${fmtDatum(backtag.datum)}:\n${zeilen.join("\n")}${retoureZeilen}${rabattZeilen}\nZu zahlen: ${fmtEUR(bestellSumme(b, sorten))}\n\nLiebe Grüße, Börni's Backstube`;
     return `https://wa.me/?text=${encodeURIComponent(text)}`;
   };
 
-  if (!liste.length) return <Card><p className="text-sm text-center py-8" style={{ color: COL.inkMuted }}>👥 Noch keine Bestellungen.</p></Card>;
+  if (!liste.length && !frei.stueck) return <Card><p className="text-sm text-center py-8" style={{ color: COL.inkMuted }}>👥 Noch keine Bestellungen.</p></Card>;
 
   return (
     <div className="flex flex-col gap-3">
@@ -1740,6 +2158,12 @@ function KassaTab({ backtag, sorten, kunden, lager, herstellProzent, kalk, stund
           rabattLabel={`Verlust durch Rabatte (${mitRabatt.length} Bestellung${mitRabatt.length > 1 ? "en" : ""})`}
           kalk={kalk}
         />
+        {frei.stueck > 0 && (
+          <div className="text-xs mt-2" style={{ color: COL.inkMuted }}>
+            Inkl. freier Verkauf: {fmtQty(frei.verkauft)} von {fmtQty(frei.stueck)} Stück verkauft = {fmtEUR(frei.brutto)}
+            {frei.offen ? " (bei manchen ist „Übrig“ noch nicht eingetragen – dann zählt alles als verkauft)" : ""}
+          </div>
+        )}
         {kalk.stundensatz > 0 && (
           <div className="mt-2" style={{ maxWidth: 220 }}>
             <Field label="Deine Arbeitsstunden an diesem Backtag">
@@ -1770,9 +2194,28 @@ function KassaTab({ backtag, sorten, kunden, lager, herstellProzent, kalk, stund
                 ))}
               </div>
               {b.notiz && <div className="text-xs mt-1 truncate" style={{ color: COL.amber, maxWidth: "100%" }}>📝 {b.notiz}</div>}
+              {bestellRetoureWert(b, sorten) > 0 && (
+                <div className="text-xs mt-1" style={{ color: COL.warn }}>
+                  ↩ Retoure: {sorten.filter((s) => retoureVon(b, s.id) > 0).map((s) => `${fmtQty(retoureVon(b, s.id))}× ${s.kurz}`).join(", ")} (−{fmtEUR(bestellRetoureWert(b, sorten))} gutgeschrieben)
+                </div>
+              )}
               {Number(b.rabatt) > 0 && (
                 <div className="text-xs mt-1" style={{ color: COL.warn }}>
                   Rabatt {b.rabatt} %: −{fmtEUR(bestellRabatt(b, sorten))} (statt {fmtEUR(bestellBrutto(b, sorten))})
+                </div>
+              )}
+              <button onClick={() => setRetoureOffen(retoureOffen === b.id ? null : b.id)} className="text-xs mt-1 mr-3 no-print underline" style={{ color: COL.inkMuted }}>
+                {retoureOffen === b.id ? "Retoure schließen" : "↩ Retoure"}
+              </button>
+              {retoureOffen === b.id && (
+                <div className="mt-2 mb-1 flex flex-col gap-1.5 no-print rounded-xl p-2.5" style={{ backgroundColor: COL.bg }}>
+                  <div className="text-xs" style={{ color: COL.inkMuted }}>Wie viel kam zurück? Wird vom Betrag abgezogen.</div>
+                  {sorten.filter((s) => (b.items[s.id] || 0) > 0).map((s) => (
+                    <label key={s.id} className="flex items-center justify-between gap-2 text-sm">
+                      <span className="truncate">{s.kurz} <span style={{ color: COL.inkMuted }}>(bestellt {fmtQty(b.items[s.id])})</span></span>
+                      <input style={{ ...inputStyle, width: 70 }} inputMode="decimal" value={b.retoure?.[s.id] ?? ""} placeholder="0" onChange={(e) => setzeRetoure(b, s.id, e.target.value)} />
+                    </label>
+                  ))}
                 </div>
               )}
               <button onClick={() => setRabattOffen(rabattOffen === b.id ? null : b.id)} className="text-xs mt-1 no-print underline" style={{ color: COL.inkMuted }}>
@@ -2139,7 +2582,51 @@ function EinstellungenTab({ daten, setDaten, lager, config, onReloadLager, onDis
                   <Field label="Verpackung €">
                     <input style={inputStyle} inputMode="decimal" value={s.verpackung ?? ""} placeholder="0" onChange={(e) => upd(s.id, { verpackung: e.target.value.replace(",", ".") })} aria-label="Verpackungskosten pro Stück bzw. Packung" />
                   </Field>
+                  <Field label="Hält Tage">
+                    <input style={inputStyle} inputMode="numeric" value={s.haltbar ?? ""} placeholder="1" onChange={(e) => upd(s.id, { haltbar: e.target.value })} aria-label="Wie viele Tage die Sorte verkauft werden kann" />
+                  </Field>
+                  <Field label="Charge Stück">
+                    <input style={inputStyle} inputMode="numeric" value={s.charge ?? ""} placeholder="1" onChange={(e) => upd(s.id, { charge: e.target.value })} aria-label="Stück pro Charge – der Planer rundet darauf auf" />
+                  </Field>
                 </div>
+                {Object.entries(s.ereignisse || {}).map(([key, p]) => (
+                  <div key={key} className="flex items-end gap-2 mt-2">
+                    <div className="flex-1 min-w-0">
+                      <Field label="Eigener Zuschlag im Planer">
+                        <select
+                          style={inputStyle}
+                          value={key}
+                          onChange={(e) => {
+                            const neu = { ...s.ereignisse };
+                            delete neu[key];
+                            upd(s.id, { ereignisse: { ...neu, [e.target.value]: p } });
+                          }}
+                        >
+                          {PLANER_FAKTOREN.filter((f) => f.key === key || !(f.key in s.ereignisse)).map((f) => (
+                            <option key={f.key} value={f.key}>{f.name}</option>
+                          ))}
+                        </select>
+                      </Field>
+                    </div>
+                    <div style={{ width: 90 }}>
+                      <Field label="%">
+                        <input style={inputStyle} inputMode="decimal" value={p ?? ""} onChange={(e) => upd(s.id, { ereignisse: { ...s.ereignisse, [key]: e.target.value } })} />
+                      </Field>
+                    </div>
+                    <button
+                      className="pb-3"
+                      style={{ color: COL.warn }}
+                      onClick={() => {
+                        const neu = { ...s.ereignisse };
+                        delete neu[key];
+                        upd(s.id, { ereignisse: neu });
+                      }}
+                      aria-label="Zuschlag entfernen"
+                    >
+                      <IcX size={16} />
+                    </button>
+                  </div>
+                ))}
                 {(s.extras || []).map((x, xi) => {
                   // Wert im Auswahlfeld: "r:Rezeptname" oder "m:Rohstoffname"
                   const xRez = x.rezept ? findRezept(lager?.recipes || [], x.rezept) : null;
@@ -2218,6 +2705,17 @@ function EinstellungenTab({ daten, setDaten, lager, config, onReloadLager, onDis
                   <label className="flex items-center gap-1.5"><input type="checkbox" checked={s.aktiv} onChange={(e) => upd(s.id, { aktiv: e.target.checked })} /> aktiv</label>
                   <label className="flex items-center gap-1.5"><input type="checkbox" checked={!!s.halbe} onChange={(e) => upd(s.id, { halbe: e.target.checked })} /> halbe möglich</label>
                   <button style={{ color: COL.accent }} onClick={() => upd(s.id, { extras: [...(s.extras || []), { rezept: "", g: "" }] })}>+ Extra</button>
+                  {PLANER_FAKTOREN.some((f) => !(f.key in (s.ereignisse || {}))) && (
+                    <button
+                      style={{ color: COL.accent }}
+                      onClick={() => {
+                        const f = PLANER_FAKTOREN.find((x) => !(x.key in (s.ereignisse || {})));
+                        upd(s.id, { ereignisse: { ...(s.ereignisse || {}), [f.key]: String(planerFaktor(daten.planer, null, f.key)) } });
+                      }}
+                    >
+                      + Planer-Zuschlag
+                    </button>
+                  )}
                   {daten.kunden.some((k) => !(k.id in (s.sonderpreise || {}))) && (
                     <button
                       style={{ color: COL.accent }}
@@ -2350,6 +2848,7 @@ function EinstellungenTab({ daten, setDaten, lager, config, onReloadLager, onDis
                 ) : null;
               })()}
             </div>
+            <PlanerEinstellungen daten={daten} setDaten={setDaten} />
             <div>💾 Speicher belegt: <b>{fmtNum(groesse / 1024)} kb</b> von 100 kb (die letzten {MAX_BACKTAGE} Backtage werden aufgehoben)</div>
             <div className="text-sm" style={{ color: COL.inkMuted }}>📱 Neue Geräte richtest du unter <b>👤 Mitarbeiter → Geräte einrichten</b> ein (für dich oder für Mitarbeiter).</div>
             <a href={LAGER_APP_URL} className="underline" style={{ color: COL.accent }}>→ Zur Lager-App</a>
@@ -2481,6 +2980,7 @@ function bestellAenderungen(alt, neu) {
   altS.forEach((s, id) => { if (!neuS.has(id)) zeilen.push(`Sorte gelöscht: ${s.kurz}`); });
   if (JSON.stringify(alt.herstellProzent) !== JSON.stringify(neu.herstellProzent)) zeilen.push(`Herstellungskosten: ${neu.herstellProzent} % der Materialkosten`);
   if (JSON.stringify(alt.kalk) !== JSON.stringify(neu.kalk)) zeilen.push("Kalkulatorische Kosten geändert");
+  if (JSON.stringify(alt.planer) !== JSON.stringify(neu.planer)) zeilen.push("Planer-Einstellungen geändert");
   return zeilen;
 }
 // Gleiche Sätze innerhalb von 3 Minuten nur einmal (z. B. beim Tippen in einem Namensfeld)
@@ -3119,7 +3619,7 @@ function App() {
         ) : tab === "bestellungen" ? (
           <BestellungenTab nurLesen={!chef} backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} lager={lager} herstellProzent={herstellProzentVon(daten)} updateBacktag={updateBacktag} addKunde={addKunde} letzteBestellung={letzteBestellung} />
         ) : tab === "backzettel" ? (
-          <BackzettelTab chef={chef} backtag={backtag} sorten={daten.sorten} lager={lager} onUebergeben={uebergeben} onReloadLager={() => ladeLager()} onDrucken={setDruck} />
+          <BackzettelTab chef={chef} backtag={backtag} backtage={daten.backtage} sorten={daten.sorten} lager={lager} planer={daten.planer} updateBacktag={updateBacktag} onUebergeben={uebergeben} onReloadLager={() => ladeLager()} onDrucken={setDruck} />
         ) : tab === "expedit" || !chef ? (
           <ExpeditTab backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} updateBacktag={updateBacktag} />
         ) : (
