@@ -142,6 +142,7 @@ const IcEdit = (p) => (<Icon {...p}><path d="M12 20h9" /><path d="M16.5 3.5a2.1 
 const IcTrash = (p) => (<Icon {...p}><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" /></Icon>);
 const IcPrint = (p) => (<Icon {...p}><path d="M6 9V2h12v7" /><rect x="6" y="14" width="12" height="8" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /></Icon>);
 const IcBox = (p) => (<Icon {...p}><path d="M21 8 12 3 3 8v8l9 5 9-5z" /><path d="m3 8 9 5 9-5M12 13v8" /></Icon>);
+const IcCart = (p) => (<Icon {...p}><circle cx="9" cy="20" r="1.5" /><circle cx="18" cy="20" r="1.5" /><path d="M2 3h3l2.6 12.4a1 1 0 0 0 1 .8h9.7a1 1 0 0 0 1-.8L21 7H6" /></Icon>);
 const IcSend = (p) => (<Icon {...p}><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z" /></Icon>);
 
 function WheatLogo({ size = 40, color = COL.wheat }) {
@@ -3001,6 +3002,229 @@ const fmtStand = (st) => {
   return `${heute ? "heute" : d.toLocaleDateString("de-DE")} ${zeit} von ${wer}`;
 };
 
+// ---------- Einkaufsliste (nur Chef) ----------
+// Was für den gewählten Backtag gebraucht wird (Bestellungen + freier Verkauf, alles in Rohstoffe aufgelöst),
+// nach Geschäft sortiert, auf ganze Packungen aufgerundet, mit geschätzten Kosten aus den Lager-Preisen.
+// Der Lagerstand wird nur abgezogen, wenn eingeschaltet (Börni 05.11.2026: derzeit nicht gepflegt).
+// daten.einkauf = { geschaefte: [...], lieferant: {materialId: Geschäft}, packung: {materialId: Menge in Einheit}, lagerBeachten }
+// backtag.einkauf = { erledigt: {id: true}, extra: [{ id, text, geschaeft }] }
+const EINKAUF_GESCHAEFTE_STANDARD = ["METRO", "Spar", "Billa", "Mühle", "Regional"];
+const fmtMengeEinheit = (n, unit) => {
+  if (!isFinite(n)) return "–";
+  if (unit === "g") return n >= 1000 ? `${fmtNum(n / 1000, 2)} kg` : `${fmtNum(n, n < 10 ? 1 : 0)} g`;
+  if (unit === "ml") return n >= 1000 ? `${fmtNum(n / 1000, 2)} l` : `${fmtNum(n, 0)} ml`;
+  return `${fmtNum(n, 2)} ${unit || ""}`.trim();
+};
+const grossEinheit = (unit) => (unit === "g" ? "kg" : unit === "ml" ? "l" : unit || "");
+const zuGross = (unit) => (unit === "g" || unit === "ml" ? 1000 : 1);
+
+function EinkaufTab({ backtag, sorten, lager, daten, setDaten, updateBacktag }) {
+  const [bearbeiten, setBearbeiten] = useState(false);
+  const [neu, setNeu] = useState({ text: "", geschaeft: "" });
+  const ek = daten.einkauf || {};
+  const geschaefte = ek.geschaefte?.length ? ek.geschaefte : EINKAUF_GESCHAEFTE_STANDARD;
+  const setEk = (patch) => setDaten((d) => ({ ...d, einkauf: { ...(d.einkauf || {}), ...patch } }));
+  const bek = backtag.einkauf || {};
+  const setBek = (fn) => updateBacktag((bt) => ({ ...bt, einkauf: fn(bt.einkauf || {}) }));
+  const bz = useMemo(() => berechneBackzettel(backtag, sorten, lager), [backtag, sorten, lager]);
+  const materials = lager?.materials || [];
+
+  const posten = useMemo(() => {
+    const liste = bz.rohstoffe
+      .filter((r) => !/^wasser/i.test(r.mat.name))
+      .map((r) => ({ id: r.materialId, mat: r.mat, bedarf: r.menge }));
+    if (ek.lagerBeachten) {
+      // dazu alles unter dem Mindestbestand
+      materials.forEach((m) => {
+        if (m.vorteig || liste.some((p) => p.id === m.id)) return;
+        if (Number(m.mindestbestand) > 0 && (Number(m.stock) || 0) < Number(m.mindestbestand)) liste.push({ id: m.id, mat: m, bedarf: 0 });
+      });
+    }
+    return liste
+      .map((p) => {
+        const stock = Number(p.mat.stock) || 0;
+        const mindest = Number(p.mat.mindestbestand) || 0;
+        // mit Lagerstand: so viel, dass nach dem Backtag noch der Mindestbestand da ist
+        const kaufen = ek.lagerBeachten ? Math.max(0, p.bedarf + mindest - stock) : p.bedarf;
+        const pack = zahl(ek.packung?.[p.id]);
+        const packs = pack > 0 ? Math.ceil(kaufen / pack - 1e-9) : 0;
+        const menge = pack > 0 ? packs * pack : kaufen;
+        return { ...p, stock, kaufen, pack, packs, menge, kosten: menge * (Number(p.mat.price) || 0), geschaeft: ek.lieferant?.[p.id] || "" };
+      })
+      .filter((p) => p.kaufen > 0.0001);
+  }, [bz, materials, ek.lagerBeachten, ek.packung, ek.lieferant]);
+  const extra = (bek.extra || []).map((x) => ({ ...x, extra: true }));
+
+  const gruppen = [...geschaefte, ""].map((g) => ({
+    name: g,
+    posten: [...posten.filter((p) => p.geschaeft === g || (g === "" && !geschaefte.includes(p.geschaeft))), ...extra.filter((x) => (x.geschaeft || "") === g || (g === "" && !geschaefte.includes(x.geschaeft || "")))],
+  })).filter((g) => g.posten.length);
+  const erledigt = (id) => !!bek.erledigt?.[id];
+  const umschalten = (id) => setBek((e) => ({ ...e, erledigt: { ...(e.erledigt || {}), [id]: !e.erledigt?.[id] } }));
+  const offen = [...posten, ...extra].filter((p) => !erledigt(p.id));
+  const summe = (liste) => liste.reduce((s, p) => s + (p.kosten || 0), 0);
+  const ohnePreis = posten.filter((p) => !(Number(p.mat.price) > 0));
+
+  const waText = () => {
+    const zeilen = gruppen
+      .map((g) => {
+        const l = g.posten.filter((p) => !erledigt(p.id));
+        if (!l.length) return "";
+        return `*${g.name || "Sonstiges"}*\n${l.map((p) => (p.extra ? `- ${p.text}` : `- ${p.mat.name}: ${p.pack > 0 ? `${p.packs} × ${fmtMengeEinheit(p.pack, p.mat.unit)}` : fmtMengeEinheit(p.menge, p.mat.unit)}`)).join("\n")}`;
+      })
+      .filter(Boolean);
+    return `🛒 Einkauf für ${fmtDatum(backtag.datum)}\n\n${zeilen.join("\n\n")}`;
+  };
+
+  const zeile = (p) => {
+    const fertig = erledigt(p.id);
+    return (
+      <div key={p.id} className="flex items-start gap-3 px-3 py-2" style={{ borderTop: `1px solid ${COL.line}`, backgroundColor: fertig ? COL.okSoft : COL.surface }}>
+        <button
+          onClick={() => umschalten(p.id)}
+          className="flex items-center justify-center rounded-lg shrink-0 font-bold"
+          style={{ width: 30, height: 30, border: `2px solid ${fertig ? COL.ok : COL.line}`, backgroundColor: fertig ? COL.ok : "#fff", color: "#fff" }}
+          aria-pressed={fertig}
+          aria-label={`${p.extra ? p.text : p.mat.name} ${fertig ? "erledigt – antippen für offen" : "abhaken"}`}
+        >
+          {fertig ? "✓" : ""}
+        </button>
+        <div className="flex-1 min-w-0">
+          <div className="flex justify-between gap-2">
+            <span className="font-medium truncate" style={{ textDecoration: fertig ? "line-through" : "none", color: fertig ? COL.inkMuted : COL.ink }}>{p.extra ? p.text : p.mat.name}</span>
+            {!p.extra && (
+              <span className="font-semibold shrink-0" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>
+                {p.pack > 0 ? `${p.packs} × ${fmtMengeEinheit(p.pack, p.mat.unit)}` : fmtMengeEinheit(p.menge, p.mat.unit)}
+              </span>
+            )}
+            {p.extra && (
+              <button onClick={() => setBek((e) => ({ ...e, extra: (e.extra || []).filter((x) => x.id !== p.id) }))} style={{ color: COL.warn }} aria-label="Entfernen">
+                <IcX size={15} />
+              </button>
+            )}
+          </div>
+          {!p.extra && (
+            <div className="text-xs" style={{ color: COL.inkMuted }}>
+              {p.bedarf > 0 ? `Bedarf ${fmtMengeEinheit(p.bedarf, p.mat.unit)}` : `unter Mindestbestand (${fmtMengeEinheit(Number(p.mat.mindestbestand) || 0, p.mat.unit)})`}
+              {ek.lagerBeachten ? ` · im Lager ${fmtMengeEinheit(p.stock, p.mat.unit)}` : ""}
+              {Number(p.mat.price) > 0 ? ` · ca. ${fmtEUR(p.kosten)}` : " · Preis fehlt"}
+            </div>
+          )}
+          {bearbeiten && !p.extra && (
+            <div className="flex flex-wrap items-center gap-2 mt-1.5">
+              <select style={{ ...inputStyle, width: "auto", padding: "5px 8px", fontSize: 13 }} value={p.geschaeft} onChange={(e) => setEk({ lieferant: { ...(ek.lieferant || {}), [p.id]: e.target.value } })} aria-label="Geschäft">
+                <option value="">– Geschäft –</option>
+                {geschaefte.map((g) => <option key={g} value={g}>{g}</option>)}
+              </select>
+              <label className="flex items-center gap-1 text-xs">
+                Packung
+                <input
+                  style={{ ...inputStyle, width: 64, padding: "5px 8px", fontSize: 13 }}
+                  inputMode="decimal"
+                  value={ek.packung?.[p.id] ? fmtNum(zahl(ek.packung[p.id]) / zuGross(p.mat.unit), 3) : ""}
+                  placeholder="–"
+                  onChange={(e) => {
+                    const v = zahl(e.target.value);
+                    const pk = { ...(ek.packung || {}) };
+                    if (v > 0) pk[p.id] = v * zuGross(p.mat.unit);
+                    else delete pk[p.id];
+                    setEk({ packung: pk });
+                  }}
+                />
+                {grossEinheit(p.mat.unit)}
+              </label>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  if (!lager) return <Card><p className="text-sm" style={{ color: COL.warn }}>Rohstoffe aus der Lager-App konnten nicht geladen werden.</p></Card>;
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Card>
+        <H2 right={<button onClick={() => setBearbeiten(!bearbeiten)} className="text-sm" style={{ color: COL.accent }}>{bearbeiten ? "Fertig" : "Geschäfte & Packungen"}</button>}>
+          🛒 Einkauf · {fmtDatum(backtag.datum)}
+        </H2>
+        <p className="text-xs -mt-2 mb-3" style={{ color: COL.inkMuted }}>
+          Alles, was für diesen Backtag gebraucht wird (Bestellungen + freier Verkauf) – oben den Backtag wechseln. Abhaken beim Einkaufen.
+        </p>
+        <div className="flex justify-between text-sm mb-2">
+          <span style={{ fontWeight: 600 }}>{offen.length ? `${offen.length} Sachen offen` : "✅ Alles erledigt"}</span>
+          <span style={{ color: COL.inkMuted }}>ca. {fmtEUR(summe(posten))}</span>
+        </div>
+        <label className="flex items-center gap-2 text-sm mb-1">
+          <input type="checkbox" checked={!!ek.lagerBeachten} onChange={(e) => setEk({ lagerBeachten: e.target.checked })} />
+          Lagerstand abziehen (und Mindestbestand auffüllen)
+        </label>
+        {!ek.lagerBeachten && <p className="text-xs mb-1" style={{ color: COL.inkMuted }}>Aus: es steht der volle Bedarf da – was du noch hast, einfach abhaken.</p>}
+        {bz.fehlend.length > 0 && <p className="text-xs" style={{ color: COL.warn }}>⚠️ Ohne Rezept, fehlt in der Liste: {bz.fehlend.map((s) => s.kurz).join(", ")}</p>}
+        {ohnePreis.length > 0 && <p className="text-xs" style={{ color: COL.amber }}>Ohne Preis in der Lager-App: {ohnePreis.map((p) => p.mat.name).join(", ")}</p>}
+        {bearbeiten && (
+          <div className="mt-3">
+            <Field label="Deine Geschäfte (mit Komma)" hint="Bei jedem Rohstoff kannst du jetzt Geschäft und Packungsgröße wählen – wird gemerkt.">
+              <input
+                style={inputStyle}
+                defaultValue={geschaefte.join(", ")}
+                onBlur={(e) => {
+                  const l = e.target.value.split(",").map((s) => s.trim()).filter(Boolean);
+                  setEk({ geschaefte: l.length ? [...new Set(l)] : EINKAUF_GESCHAEFTE_STANDARD });
+                }}
+              />
+            </Field>
+          </div>
+        )}
+      </Card>
+
+      {gruppen.length === 0 && (
+        <Card><p className="text-sm text-center py-6" style={{ color: COL.inkMuted }}>Für diesen Backtag ist noch nichts eingetragen.</p></Card>
+      )}
+      {gruppen.map((g) => (
+        <div key={g.name || "ohne"} className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${COL.line}`, backgroundColor: COL.surface }}>
+          <div className="flex justify-between items-center px-3 py-2" style={{ backgroundColor: COL.bg }}>
+            <span className="font-semibold">{g.name || "Noch kein Geschäft"}</span>
+            <span className="text-xs" style={{ color: COL.inkMuted }}>
+              {g.posten.filter((p) => !erledigt(p.id)).length} offen{summe(g.posten) > 0 ? ` · ca. ${fmtEUR(summe(g.posten))}` : ""}
+            </span>
+          </div>
+          {[...g.posten].sort((a, b) => erledigt(a.id) - erledigt(b.id)).map(zeile)}
+        </div>
+      ))}
+
+      <Card>
+        <div className="font-semibold mb-2">+ Noch etwas dazu</div>
+        <div className="flex flex-wrap gap-2">
+          <input style={{ ...inputStyle, flex: "1 1 160px", minWidth: 0 }} value={neu.text} placeholder="z.B. Backpapier, Sackerl, Schleifen" onChange={(e) => setNeu({ ...neu, text: e.target.value })} />
+          <select style={{ ...inputStyle, width: "auto" }} value={neu.geschaeft} onChange={(e) => setNeu({ ...neu, geschaeft: e.target.value })} aria-label="Geschäft">
+            <option value="">– Geschäft –</option>
+            {geschaefte.map((g) => <option key={g} value={g}>{g}</option>)}
+          </select>
+          <Btn
+            small
+            primary
+            disabled={!neu.text.trim()}
+            onClick={() => {
+              setBek((e) => ({ ...e, extra: [...(e.extra || []), { id: uid(), text: neu.text.trim(), geschaeft: neu.geschaeft }] }));
+              setNeu({ text: "", geschaeft: neu.geschaeft });
+            }}
+          >
+            Dazu
+          </Btn>
+        </div>
+      </Card>
+
+      {offen.length > 0 && (
+        <a href={`https://wa.me/?text=${encodeURIComponent(waText())}`} target="_blank" rel="noopener" className="text-sm font-semibold text-center px-4 py-3 rounded-xl" style={{ backgroundColor: "#E7F6EC", color: "#1F7A3A" }}>
+          💬 Einkaufsliste per WhatsApp schicken
+        </a>
+      )}
+      <p className="text-xs text-center" style={{ color: COL.inkMuted }}>Preise aus der Lager-App (netto), Packungen aufgerundet – nur zur Orientierung.</p>
+    </div>
+  );
+}
+
 // ---------- Expedit: alle Produkte des Backtags, pro Produkt die Kunden von der größten zur kleinsten Menge ----------
 // Jedes Produkt muss bei jedem Kunden bestätigt werden. Gespeichert wird in der Bestellung: expedit[sorteId] = bestätigte
 // Menge – ändert sich die Menge danach, ist es wieder offen ("Menge geändert – nochmal bestätigen").
@@ -3167,6 +3391,7 @@ const TABS = [
   { key: "bestellungen", label: "Bestellungen", mobil: "Bestellung", icon: IcList },
   { key: "backzettel", label: "Backzettel", icon: IcBread },
   { key: "expedit", label: "Expedit", icon: IcBox },
+  { key: "einkauf", label: "Einkauf", icon: IcCart },
   { key: "kassa", label: "Kunden & €", mobil: "Kunden", icon: IcUsers },
   { key: "einstellungen", label: "Einstellungen", mobil: "Einstell.", icon: IcGear },
 ];
@@ -3620,6 +3845,8 @@ function App() {
           <BestellungenTab nurLesen={!chef} backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} lager={lager} herstellProzent={herstellProzentVon(daten)} updateBacktag={updateBacktag} addKunde={addKunde} letzteBestellung={letzteBestellung} />
         ) : tab === "backzettel" ? (
           <BackzettelTab chef={chef} backtag={backtag} backtage={daten.backtage} sorten={daten.sorten} lager={lager} planer={daten.planer} updateBacktag={updateBacktag} onUebergeben={uebergeben} onReloadLager={() => ladeLager()} onDrucken={setDruck} />
+        ) : tab === "einkauf" && chef ? (
+          <EinkaufTab backtag={backtag} sorten={daten.sorten} lager={lager} daten={daten} setDaten={setDaten} updateBacktag={updateBacktag} />
         ) : tab === "expedit" || !chef ? (
           <ExpeditTab backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} updateBacktag={updateBacktag} />
         ) : (
@@ -3635,7 +3862,7 @@ function App() {
                 <span className="flex items-center justify-center rounded-full" style={{ width: 44, height: 28, backgroundColor: on ? COL.accentSoft : "transparent" }}>
                   <I size={19} strokeWidth={on ? 2.4 : 2} />
                 </span>
-                <span className="text-[11px] w-full text-center truncate" style={{ fontWeight: on ? 600 : 500 }}>{t.mobil || t.label}</span>
+                <span className={`${tabs.length > 5 ? "text-[10px]" : "text-[11px]"} w-full text-center truncate`} style={{ fontWeight: on ? 600 : 500 }}>{t.mobil || t.label}</span>
                 {t.key === "kassa" && offen > 0 && (
                   <span className="absolute top-0 right-1/4 text-[10px] font-bold rounded-full px-1.5" style={{ backgroundColor: COL.accent, color: "#fff" }}>{offen}</span>
                 )}
