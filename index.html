@@ -2030,13 +2030,68 @@ const DRUCK_ARTEN = [
   { key: "backzettel", label: "📋 Backzettel" },
   { key: "kundenzettel", label: "✂️ Kundenzettel" },
   { key: "lieferliste", label: "🧾 Lieferliste" },
+  { key: "einkauf", label: "🛒 Einkauf", nurChef: true },
 ];
 
-function DruckAnsicht({ art, setArt, backtag, sorten, kunden, lager, onClose }) {
+// Einkaufsliste zum Ausdrucken: offene Sachen nach Geschäft, mit Kästchen zum Abhaken
+function EinkaufDruck({ backtag, sorten, lager, einkauf, mitPreisen }) {
+  const { gruppen } = einkaufBerechnen(backtag, sorten, lager, einkauf || {});
+  const erledigt = (id) => !!backtag.einkauf?.erledigt?.[id];
+  const offeneGruppen = gruppen.map((g) => ({ ...g, posten: g.posten.filter((p) => !erledigt(p.id)) })).filter((g) => g.posten.length);
+  const alle = offeneGruppen.flatMap((g) => g.posten);
+  const summe = (l) => l.reduce((s, p) => s + (p.kosten || 0), 0);
+  const schonErledigt = gruppen.flatMap((g) => g.posten).filter((p) => erledigt(p.id));
+  return (
+    <>
+      <DruckKopf
+        titel="Einkaufsliste"
+        datum={backtag.datum}
+        rechts={
+          <>
+            <div>{alle.length} Sachen{mitPreisen && summe(alle) > 0 ? <> · ca. <b>{fmtEUR(summe(alle))}</b></> : null}</div>
+            <div>für Bestellungen + freien Verkauf</div>
+          </>
+        }
+      />
+      {offeneGruppen.length === 0 && <p style={{ marginTop: 12 }}>Alles schon erledigt.</p>}
+      {offeneGruppen.map((g) => (
+        <div key={g.name || "ohne"} style={{ breakInside: "avoid" }}>
+          <h2>
+            {g.name || "Noch kein Geschäft"}
+            {mitPreisen && summe(g.posten) > 0 && <span style={{ float: "right", fontSize: "10pt", fontWeight: 400 }}>ca. {fmtEUR(summe(g.posten))}</span>}
+          </h2>
+          <table>
+            <tbody>
+              {g.posten.map((p) => (
+                <tr key={p.id}>
+                  <td style={{ width: 18, padding: "5px 2px" }}><Box /></td>
+                  <td style={{ padding: "5px 4px", fontSize: "11pt" }}>{p.extra ? p.text : p.mat.name}</td>
+                  <td className="zahl" style={{ padding: "5px 4px", fontSize: "11pt" }}>{p.extra ? "" : einkaufMenge(p)}</td>
+                  {mitPreisen && <td className="zahl" style={{ padding: "5px 4px", fontWeight: 400, color: "#555", width: 70 }}>{!p.extra && p.kosten > 0 ? fmtEUR(p.kosten) : ""}</td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+      {schonErledigt.length > 0 && (
+        <p style={{ marginTop: 14, fontSize: "8.5pt", color: "#777" }}>Schon abgehakt: {schonErledigt.map((p) => (p.extra ? p.text : p.mat.name)).join(", ")}</p>
+      )}
+    </>
+  );
+}
+
+function DruckAnsicht({ art, setArt, backtag, sorten, kunden, lager, einkauf, onClose }) {
   const [mitRohstoffen, setMitRohstoffen] = useState(false);
   const [mitPreisen, setMitPreisen] = useState(true);
   const quer = art === "lieferliste" && lieferlisteSpalten(backtag, sorten).length > 7;
-  const leer = !(backtag.bestellungen || []).length;
+  const hatFrei = Object.values(backtag.frei || {}).some((f) => zahl(f?.menge) > 0);
+  const leer =
+    art === "einkauf"
+      ? !einkaufBerechnen(backtag, sorten, lager, einkauf || {}).gruppen.length
+      : art === "backzettel"
+      ? !((backtag.bestellungen || []).length || hatFrei)
+      : !(backtag.bestellungen || []).length;
 
   useEffect(() => {
     const prev = document.title;
@@ -2049,8 +2104,8 @@ function DruckAnsicht({ art, setArt, backtag, sorten, kunden, lager, onClose }) 
     <div className="druck-overlay">
       <style>{`@page { size: A4 ${quer ? "landscape" : "portrait"}; margin: 10mm; }`}</style>
       <div className="no-print sticky top-0 z-10 px-3 py-3 mb-4 flex flex-wrap items-center gap-2" style={{ backgroundColor: COL.crust, color: "#fff", fontFamily: "'IBM Plex Sans', sans-serif" }}>
-        <div className="flex gap-1 p-1 rounded-xl" style={{ backgroundColor: "rgba(255,255,255,0.1)" }}>
-          {DRUCK_ARTEN.map((d) => (
+        <div className="flex flex-wrap gap-1 p-1 rounded-xl" style={{ backgroundColor: "rgba(255,255,255,0.1)" }}>
+          {DRUCK_ARTEN.filter((d) => !d.nurChef || Zugang.istChef()).map((d) => (
             <button key={d.key} onClick={() => setArt(d.key)} className="text-sm px-2.5 py-1.5 rounded-lg whitespace-nowrap" style={{ backgroundColor: art === d.key ? COL.wheat : "transparent", color: art === d.key ? COL.crust : "#fff", fontWeight: art === d.key ? 600 : 400 }}>
               {d.label}
             </button>
@@ -2059,7 +2114,7 @@ function DruckAnsicht({ art, setArt, backtag, sorten, kunden, lager, onClose }) 
         {art === "backzettel" && (
           <label className="text-sm flex items-center gap-1.5"><input type="checkbox" checked={mitRohstoffen} onChange={(e) => setMitRohstoffen(e.target.checked)} /> Rohstoffbedarf mitdrucken</label>
         )}
-        {art === "kundenzettel" && (
+        {(art === "kundenzettel" || art === "einkauf") && (
           <label className="text-sm flex items-center gap-1.5"><input type="checkbox" checked={mitPreisen} onChange={(e) => setMitPreisen(e.target.checked)} /> mit Preisen</label>
         )}
         <div className="flex gap-2 ml-auto">
@@ -2071,11 +2126,13 @@ function DruckAnsicht({ art, setArt, backtag, sorten, kunden, lager, onClose }) 
       </div>
       <div className={`druck-blatt ${quer ? "quer" : ""}`}>
         {leer ? (
-          <p>Für diesen Backtag gibt es noch keine Bestellungen.</p>
+          <p>{art === "einkauf" ? "Für diesen Backtag ist noch nichts einzukaufen." : "Für diesen Backtag gibt es noch keine Bestellungen."}</p>
         ) : art === "backzettel" ? (
           <BackzettelDruck backtag={backtag} sorten={sorten} kunden={kunden} lager={lager} mitRohstoffen={mitRohstoffen} />
         ) : art === "kundenzettel" ? (
           <KundenzettelDruck backtag={backtag} sorten={sorten} kunden={kunden} mitPreisen={mitPreisen} />
+        ) : art === "einkauf" ? (
+          <EinkaufDruck backtag={backtag} sorten={sorten} lager={lager} einkauf={einkauf} mitPreisen={mitPreisen} />
         ) : (
           <LieferlisteDruck backtag={backtag} sorten={sorten} kunden={kunden} />
         )}
@@ -3018,47 +3075,50 @@ const fmtMengeEinheit = (n, unit) => {
 const grossEinheit = (unit) => (unit === "g" ? "kg" : unit === "ml" ? "l" : unit || "");
 const zuGross = (unit) => (unit === "g" || unit === "ml" ? 1000 : 1);
 
-function EinkaufTab({ backtag, sorten, lager, daten, setDaten, updateBacktag }) {
+// Liste für einen Backtag berechnen – gleich für den Reiter und den Ausdruck
+function einkaufBerechnen(backtag, sorten, lager, ek = {}) {
+  const geschaefte = ek.geschaefte?.length ? ek.geschaefte : EINKAUF_GESCHAEFTE_STANDARD;
+  const bz = berechneBackzettel(backtag, sorten, lager);
+  const materials = lager?.materials || [];
+  const liste = bz.rohstoffe
+    .filter((r) => !/^wasser/i.test(r.mat.name))
+    .map((r) => ({ id: r.materialId, mat: r.mat, bedarf: r.menge }));
+  if (ek.lagerBeachten) {
+    // dazu alles unter dem Mindestbestand
+    materials.forEach((m) => {
+      if (m.vorteig || liste.some((p) => p.id === m.id)) return;
+      if (Number(m.mindestbestand) > 0 && (Number(m.stock) || 0) < Number(m.mindestbestand)) liste.push({ id: m.id, mat: m, bedarf: 0 });
+    });
+  }
+  const posten = liste
+    .map((p) => {
+      const stock = Number(p.mat.stock) || 0;
+      const mindest = Number(p.mat.mindestbestand) || 0;
+      // mit Lagerstand: so viel, dass nach dem Backtag noch der Mindestbestand da ist
+      const kaufen = ek.lagerBeachten ? Math.max(0, p.bedarf + mindest - stock) : p.bedarf;
+      const pack = zahl(ek.packung?.[p.id]);
+      const packs = pack > 0 ? Math.ceil(kaufen / pack - 1e-9) : 0;
+      const menge = pack > 0 ? packs * pack : kaufen;
+      return { ...p, stock, kaufen, pack, packs, menge, kosten: menge * (Number(p.mat.price) || 0), geschaeft: ek.lieferant?.[p.id] || "" };
+    })
+    .filter((p) => p.kaufen > 0.0001);
+  const extra = (backtag.einkauf?.extra || []).map((x) => ({ ...x, extra: true }));
+  const inGruppe = (g, name) => (name || "") === g || (g === "" && !geschaefte.includes(name || ""));
+  const gruppen = [...geschaefte, ""]
+    .map((g) => ({ name: g, posten: [...posten.filter((p) => inGruppe(g, p.geschaeft)), ...extra.filter((x) => inGruppe(g, x.geschaeft))] }))
+    .filter((g) => g.posten.length);
+  return { bz, geschaefte, posten, extra, gruppen };
+}
+const einkaufMenge = (p) => (p.pack > 0 ? `${p.packs} × ${fmtMengeEinheit(p.pack, p.mat.unit)}` : fmtMengeEinheit(p.menge, p.mat.unit));
+
+function EinkaufTab({ backtag, sorten, lager, daten, setDaten, updateBacktag, onDrucken }) {
   const [bearbeiten, setBearbeiten] = useState(false);
   const [neu, setNeu] = useState({ text: "", geschaeft: "" });
   const ek = daten.einkauf || {};
-  const geschaefte = ek.geschaefte?.length ? ek.geschaefte : EINKAUF_GESCHAEFTE_STANDARD;
   const setEk = (patch) => setDaten((d) => ({ ...d, einkauf: { ...(d.einkauf || {}), ...patch } }));
   const bek = backtag.einkauf || {};
   const setBek = (fn) => updateBacktag((bt) => ({ ...bt, einkauf: fn(bt.einkauf || {}) }));
-  const bz = useMemo(() => berechneBackzettel(backtag, sorten, lager), [backtag, sorten, lager]);
-  const materials = lager?.materials || [];
-
-  const posten = useMemo(() => {
-    const liste = bz.rohstoffe
-      .filter((r) => !/^wasser/i.test(r.mat.name))
-      .map((r) => ({ id: r.materialId, mat: r.mat, bedarf: r.menge }));
-    if (ek.lagerBeachten) {
-      // dazu alles unter dem Mindestbestand
-      materials.forEach((m) => {
-        if (m.vorteig || liste.some((p) => p.id === m.id)) return;
-        if (Number(m.mindestbestand) > 0 && (Number(m.stock) || 0) < Number(m.mindestbestand)) liste.push({ id: m.id, mat: m, bedarf: 0 });
-      });
-    }
-    return liste
-      .map((p) => {
-        const stock = Number(p.mat.stock) || 0;
-        const mindest = Number(p.mat.mindestbestand) || 0;
-        // mit Lagerstand: so viel, dass nach dem Backtag noch der Mindestbestand da ist
-        const kaufen = ek.lagerBeachten ? Math.max(0, p.bedarf + mindest - stock) : p.bedarf;
-        const pack = zahl(ek.packung?.[p.id]);
-        const packs = pack > 0 ? Math.ceil(kaufen / pack - 1e-9) : 0;
-        const menge = pack > 0 ? packs * pack : kaufen;
-        return { ...p, stock, kaufen, pack, packs, menge, kosten: menge * (Number(p.mat.price) || 0), geschaeft: ek.lieferant?.[p.id] || "" };
-      })
-      .filter((p) => p.kaufen > 0.0001);
-  }, [bz, materials, ek.lagerBeachten, ek.packung, ek.lieferant]);
-  const extra = (bek.extra || []).map((x) => ({ ...x, extra: true }));
-
-  const gruppen = [...geschaefte, ""].map((g) => ({
-    name: g,
-    posten: [...posten.filter((p) => p.geschaeft === g || (g === "" && !geschaefte.includes(p.geschaeft))), ...extra.filter((x) => (x.geschaeft || "") === g || (g === "" && !geschaefte.includes(x.geschaeft || "")))],
-  })).filter((g) => g.posten.length);
+  const { bz, geschaefte, posten, extra, gruppen } = useMemo(() => einkaufBerechnen(backtag, sorten, lager, ek), [backtag, sorten, lager, ek]);
   const erledigt = (id) => !!bek.erledigt?.[id];
   const umschalten = (id) => setBek((e) => ({ ...e, erledigt: { ...(e.erledigt || {}), [id]: !e.erledigt?.[id] } }));
   const offen = [...posten, ...extra].filter((p) => !erledigt(p.id));
@@ -3215,10 +3275,15 @@ function EinkaufTab({ backtag, sorten, lager, daten, setDaten, updateBacktag }) 
         </div>
       </Card>
 
-      {offen.length > 0 && (
-        <a href={`https://wa.me/?text=${encodeURIComponent(waText())}`} target="_blank" rel="noopener" className="text-sm font-semibold text-center px-4 py-3 rounded-xl" style={{ backgroundColor: "#E7F6EC", color: "#1F7A3A" }}>
-          💬 Einkaufsliste per WhatsApp schicken
-        </a>
+      {gruppen.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          <Btn onClick={() => onDrucken("einkauf")} className="flex-1 justify-center"><IcPrint size={16} /> Einkaufsliste drucken</Btn>
+          {offen.length > 0 && (
+            <a href={`https://wa.me/?text=${encodeURIComponent(waText())}`} target="_blank" rel="noopener" className="flex-1 text-sm font-semibold text-center px-4 py-3 rounded-xl" style={{ backgroundColor: "#E7F6EC", color: "#1F7A3A" }}>
+              💬 Per WhatsApp schicken
+            </a>
+          )}
+        </div>
       )}
       <p className="text-xs text-center" style={{ color: COL.inkMuted }}>Preise aus der Lager-App (netto), Packungen aufgerundet – nur zur Orientierung.</p>
     </div>
@@ -3723,7 +3788,7 @@ function App() {
   return (
     <>
     {druck && backtag && (
-      <DruckAnsicht art={druck} setArt={setDruck} backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} lager={lager} onClose={() => setDruck(null)} />
+      <DruckAnsicht art={druck} setArt={setDruck} backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} lager={lager} einkauf={daten.einkauf} onClose={() => setDruck(null)} />
     )}
     <div className={`min-h-screen w-full ${druck ? "screen-only" : ""}`} style={{ backgroundColor: COL.bg, fontFamily: "'IBM Plex Sans', sans-serif", color: COL.ink }}>
       <div className="max-w-3xl mx-auto px-4 pt-4 pb-28 sm:pb-10">
@@ -3846,7 +3911,7 @@ function App() {
         ) : tab === "backzettel" ? (
           <BackzettelTab chef={chef} backtag={backtag} backtage={daten.backtage} sorten={daten.sorten} lager={lager} planer={daten.planer} updateBacktag={updateBacktag} onUebergeben={uebergeben} onReloadLager={() => ladeLager()} onDrucken={setDruck} />
         ) : tab === "einkauf" && chef ? (
-          <EinkaufTab backtag={backtag} sorten={daten.sorten} lager={lager} daten={daten} setDaten={setDaten} updateBacktag={updateBacktag} />
+          <EinkaufTab backtag={backtag} sorten={daten.sorten} lager={lager} daten={daten} setDaten={setDaten} updateBacktag={updateBacktag} onDrucken={setDruck} />
         ) : tab === "expedit" || !chef ? (
           <ExpeditTab backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} updateBacktag={updateBacktag} />
         ) : (
