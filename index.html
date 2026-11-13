@@ -869,6 +869,38 @@ function QrCode({ text, size = 220 }) {
 // ---------- Setup ----------
 // Gerät ohne Bestell-Speicher-Nr.: einrichten über den QR-Code / Link aus der Bestell-App (Chef)
 function NichtEingerichtet() {
+  // Chef: Bestell-Speicher im Konto selbst suchen (z.B. wenn der Einrichtungs-Link von der Lager-App ohne Bestell-Nr. kam)
+  const [sucht, setSucht] = useState(() => Zugang.istChef());
+  useEffect(() => {
+    if (!Zugang.istChef()) return;
+    let aus = false;
+    (async () => {
+      try {
+        const g = Zugang.geraet();
+        const gefunden = await andereBestellSpeicher({ apiKey: "zugang", lagerBin: g.lagerBin, bestellBin: null });
+        if (aus) return;
+        if (gefunden.length) {
+          // der zuletzt gespeicherte Bestell-Speicher (bei Gleichstand der mit den meisten Bestellungen)
+          gefunden.sort((a, b) => String(b.stand || "").localeCompare(String(a.stand || "")) || b.bestellungen - a.bestellungen);
+          Zugang.speicherSetzen({ bestellBin: gefunden[0].id });
+          location.reload();
+          return;
+        }
+      } catch (e) {}
+      if (!aus) setSucht(false);
+    })();
+    return () => {
+      aus = true;
+    };
+  }, []);
+  if (sucht) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-6 text-center" style={{ backgroundColor: COL.bg, fontFamily: "'IBM Plex Sans', sans-serif", color: COL.ink }}>
+        <Brand small />
+        <div className="text-sm" style={{ color: COL.inkMuted }}>Suche deine Bestell-Daten …</div>
+      </div>
+    );
+  }
   return (
     <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-6 text-center" style={{ backgroundColor: COL.bg, fontFamily: "'IBM Plex Sans', sans-serif", color: COL.ink }}>
       <Brand small />
