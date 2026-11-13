@@ -625,17 +625,40 @@ function preisFuer(s, kundeId) {
   const sonder = kundeId ? zahl(s?.sonderpreise?.[kundeId]) : 0;
   return sonder > 0 ? sonder : Number(s?.preis) || 0;
 }
+// Preis für ein halbes Stück (Börni 13.11.2026: ½ kostet z.B. 2,50 statt 2,25): eigener Preis je Sorte ("Preis ½"),
+// sonst die Hälfte. Hat der Kunde einen Sonderpreis, gilt die Hälfte des Sonderpreises.
+function preisHalbFuer(s, kundeId) {
+  const sonder = kundeId ? zahl(s?.sonderpreise?.[kundeId]) : 0;
+  if (sonder > 0) return runden2(sonder / 2);
+  const eigen = zahl(s?.preisHalb);
+  return eigen > 0 ? eigen : runden2((Number(s?.preis) || 0) / 2);
+}
+// Betrag für eine Menge: ganze Stück zum Stückpreis, ein übriges halbes zum Preis für ½
+function betragFuer(s, kundeId, menge) {
+  const m = Number(menge) || 0;
+  const p = preisFuer(s, kundeId);
+  if (!s || !(p > 0) || m <= 0) return 0;
+  const ganz = Math.floor(m + 1e-9);
+  const rest = Math.round((m - ganz) * 100) / 100;
+  if (rest === 0.5) return runden2(ganz * p + preisHalbFuer(s, kundeId));
+  return runden2(m * p);
+}
 // Retouren werden gutgeschrieben (Börni 02.11.2026): bezahlt wird nur, was der Kunde verkauft hat.
 // b.retoure[sorteId] = zurückgegebene Stück (höchstens so viel wie bestellt)
 const retoureVon = (b, sid) => Math.min(Number(b?.items?.[sid]) || 0, zahl(b?.retoure?.[sid]));
 const verkauftVon = (b, sid) => (Number(b?.items?.[sid]) || 0) - retoureVon(b, sid);
 function bestellRetoureWert(b, sorten) {
-  return runden2(Object.keys(b?.retoure || {}).reduce((s, sid) => s + retoureVon(b, sid) * preisFuer(sorten.find((x) => x.id === sid), b.kundeId), 0));
+  return runden2(
+    Object.keys(b?.retoure || {}).reduce((s, sid) => {
+      const so = sorten.find((x) => x.id === sid);
+      return s + betragFuer(so, b.kundeId, b.items?.[sid]) - betragFuer(so, b.kundeId, verkauftVon(b, sid));
+    }, 0)
+  );
 }
 function bestellBrutto(b, sorten) {
   return Object.keys(b.items || {}).reduce((s, sid) => {
     const so = sorten.find((x) => x.id === sid);
-    return s + verkauftVon(b, sid) * preisFuer(so, b.kundeId);
+    return s + betragFuer(so, b.kundeId, verkauftVon(b, sid));
   }, 0);
 }
 function bestellRabatt(b, sorten) {
@@ -770,7 +793,7 @@ function freiWirtschaft(backtag, sorten, lager, herstellProzent = HERSTELL_PROZE
     if (uebrig === null) offen = true;
     stueck += menge;
     verkauft += menge - (uebrig || 0);
-    brutto += (menge - (uebrig || 0)) * (Number(so.preis) || 0);
+    brutto += betragFuer(so, null, menge - (uebrig || 0));
     const k = stueckKosten(so, lager);
     kosten += menge * k.kosten;
     verpackung += menge * zahl(so.verpackung);
@@ -1127,7 +1150,7 @@ function BestellEditor({ start, sorten, kunden, lager, herstellProzent, letzteBe
               <div key={s.id} className="flex items-center justify-between gap-2 py-2" style={{ borderTop: i ? `1px solid ${COL.line}` : "none" }}>
                 <div className="min-w-0">
                   <div className="font-medium truncate" style={{ color: q > 0 ? COL.ink : COL.inkMuted }}>{s.kurz} <span className="text-xs font-normal" style={{ color: COL.inkMuted }}>{s.name !== s.kurz ? s.name : ""}</span></div>
-                  <div className="text-xs" style={{ color: COL.inkMuted }}>{p > 0 ? fmtEUR(p) : "Preis fehlt"}{sonder ? " (Sonderpreis)" : ""}{q > 0 && p > 0 ? ` · ${fmtEUR(q * p)}` : ""}</div>
+                  <div className="text-xs" style={{ color: COL.inkMuted }}>{p > 0 ? fmtEUR(p) : "Preis fehlt"}{sonder ? " (Sonderpreis)" : ""}{s.halbe && p > 0 ? ` · ½ ${fmtEUR(preisHalbFuer(s, kunde?.id))}` : ""}{q > 0 && p > 0 ? ` · ${fmtEUR(betragFuer(s, kunde?.id, q))}` : ""}</div>
                 </div>
                 <Stepper value={q} halbe={s.halbe} onChange={(v) => setItems({ ...items, [s.id]: v })} />
               </div>
@@ -1960,7 +1983,7 @@ function KundenzettelDruck({ backtag, sorten, kunden, mitPreisen }) {
                     <td style={{ width: 16, padding: "3px 2px" }}><Box /></td>
                     <td className="zahl" style={{ width: 34, padding: "3px 4px", fontSize: "12pt" }}>{fmtQty(b.items[s.id])}×</td>
                     <td style={{ padding: "3px 2px" }}>{s.name}</td>
-                    {mitPreisen && <td className="zahl" style={{ fontWeight: 400, padding: "3px 2px" }}>{preisFuer(s, b.kundeId) > 0 ? fmtEUR(b.items[s.id] * preisFuer(s, b.kundeId)) : ""}</td>}
+                    {mitPreisen && <td className="zahl" style={{ fontWeight: 400, padding: "3px 2px" }}>{preisFuer(s, b.kundeId) > 0 ? fmtEUR(betragFuer(s, b.kundeId, b.items[s.id])) : ""}</td>}
                   </tr>
                 ))}
               </tbody>
@@ -2212,7 +2235,7 @@ function KassaTab({ backtag, sorten, kunden, lager, herstellProzent, kalk, stund
   };
 
   const waLink = (b) => {
-    const zeilen = sorten.filter((s) => (b.items[s.id] || 0) > 0).map((s) => `${fmtQty(b.items[s.id])}× ${s.name} (${fmtEUR(b.items[s.id] * preisFuer(s, b.kundeId))})`);
+    const zeilen = sorten.filter((s) => (b.items[s.id] || 0) > 0).map((s) => `${fmtQty(b.items[s.id])}× ${s.name} (${fmtEUR(betragFuer(s, b.kundeId, b.items[s.id]))})`);
     const retoureZeilen = bestellRetoureWert(b, sorten) > 0 ? `\nRetoure: ${sorten.filter((s) => retoureVon(b, s.id) > 0).map((s) => `${fmtQty(retoureVon(b, s.id))}× ${s.name}`).join(", ")} (−${fmtEUR(bestellRetoureWert(b, sorten))})` : "";
     const rabattZeilen = Number(b.rabatt) > 0 ? `\nSumme: ${fmtEUR(bestellBrutto(b, sorten))}\nRabatt ${b.rabatt} %: −${fmtEUR(bestellRabatt(b, sorten))}` : "";
     const text = `Hallo ${kName(b.kundeId).split(" ")[0]}! 🍞\nDeine Bestellung für ${fmtDatum(backtag.datum)}:\n${zeilen.join("\n")}${retoureZeilen}${rabattZeilen}\nZu zahlen: ${fmtEUR(bestellSumme(b, sorten))}\n\nLiebe Grüße, Börni's Backstube`;
@@ -2279,7 +2302,7 @@ function KassaTab({ backtag, sorten, kunden, lager, herstellProzent, kalk, stund
                 {sorten.filter((s) => (b.items[s.id] || 0) > 0).map((s) => (
                   <span key={s.id}>
                     <b style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmtQty(b.items[s.id])}×</b> {s.name}{" "}
-                    <span style={{ color: COL.inkMuted }}>{preisFuer(s, b.kundeId) > 0 ? fmtEUR(b.items[s.id] * preisFuer(s, b.kundeId)) : "(Preis fehlt)"}</span>
+                    <span style={{ color: COL.inkMuted }}>{preisFuer(s, b.kundeId) > 0 ? fmtEUR(betragFuer(s, b.kundeId, b.items[s.id])) : "(Preis fehlt)"}</span>
                   </span>
                 ))}
               </div>
@@ -2794,6 +2817,19 @@ function EinstellungenTab({ daten, setDaten, lager, config, onReloadLager, onDis
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3 text-sm">
                   <label className="flex items-center gap-1.5"><input type="checkbox" checked={s.aktiv} onChange={(e) => upd(s.id, { aktiv: e.target.checked })} /> aktiv</label>
                   <label className="flex items-center gap-1.5"><input type="checkbox" checked={!!s.halbe} onChange={(e) => upd(s.id, { halbe: e.target.checked })} /> halbe möglich</label>
+                  {s.halbe && (
+                    <label className="flex items-center gap-1.5">
+                      Preis ½ €
+                      <input
+                        style={{ ...inputStyle, width: 80, padding: "6px 8px" }}
+                        inputMode="decimal"
+                        value={s.preisHalb ?? ""}
+                        placeholder={Number(s.preis) > 0 ? fmtEUR(runden2(Number(s.preis) / 2)).replace(/\s*€/, "") : ""}
+                        onChange={(e) => upd(s.id, { preisHalb: e.target.value.replace(",", ".") })}
+                        aria-label="Preis für ein halbes Stück (leer = die Hälfte)"
+                      />
+                    </label>
+                  )}
                   <button style={{ color: COL.accent }} onClick={() => upd(s.id, { extras: [...(s.extras || []), { rezept: "", g: "" }] })}>+ Extra</button>
                   {PLANER_FAKTOREN.some((f) => !(f.key in (s.ereignisse || {}))) && (
                     <button
