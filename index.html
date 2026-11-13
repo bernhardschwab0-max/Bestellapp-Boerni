@@ -617,7 +617,48 @@ function berechneBackzettel(backtag, sorten, lager) {
 }
 
 // ---------- Preise, Rabatt, Deckungsbeitrag ----------
-const RABATTE = [0, 10, 15, 20, 30, 40];
+const RABATTE = [0, 3, 5, 10, 15, 20, 30, 40];
+// Stammkunden-Rabatt (Börni 13.11.2026): nur für Wiederverkäufer (Firmen, Gasthäuser) – nicht für Privatkunden.
+// Klasse nach Bestellungen pro Woche (Schnitt der letzten 4 Wochen vor dem Backtag): A ab 4, B ab 3, C ab 1 (also 1–2).
+// Die Rabatt-Prozente trägt Börni unter Einstellungen → Kunden ein (stehen bewusst nicht im Code).
+const STAMM_AB = { A: 4, B: 3, C: 1 };
+function bestellungenProWoche(backtage, kundeId, datum) {
+  const ende = new Date((datum || isoHeute()) + "T00:00:00").getTime();
+  const anfang = ende - 28 * 864e5;
+  let anzahl = 0;
+  let erste = null;
+  (backtage || []).forEach((bt) => {
+    const t = new Date(bt.datum + "T00:00:00").getTime();
+    if (!(t >= anfang && t < ende)) return;
+    const n = (bt.bestellungen || []).filter((b) => b.kundeId === kundeId).length;
+    if (n) {
+      anzahl += n;
+      if (erste === null || t < erste) erste = t;
+    }
+  });
+  if (!anzahl) return 0;
+  const wochen = Math.min(4, Math.max(1, Math.ceil((ende - erste) / (7 * 864e5))));
+  return anzahl / wochen;
+}
+// → null (kein Wiederverkäufer) oder { klasse: "A"|"B"|"C"|null, proWoche, manuell, rabatt }
+function kundeKlasse(daten, kunde, datum) {
+  if (!kunde || !kunde.wiederverkauf) return null;
+  const sr = daten?.stammrabatt || {};
+  const ab = (k) => zahl(sr[`ab${k}`]) || STAMM_AB[k];
+  const proWoche = bestellungenProWoche(daten?.backtage, kunde.id, datum);
+  let klasse = null;
+  let manuell = false;
+  if (["A", "B", "C"].includes(kunde.klasse)) {
+    klasse = kunde.klasse;
+    manuell = true;
+  } else if (kunde.klasse === "keine") {
+    manuell = true;
+  } else {
+    const r = Math.round(proWoche);
+    klasse = r >= ab("A") ? "A" : r >= ab("B") ? "B" : r >= ab("C") ? "C" : null;
+  }
+  return { klasse, proWoche, manuell, rabatt: klasse ? zahl(sr[klasse]) : 0 };
+}
 const runden2 = (n) => Math.round(n * 100) / 100;
 // Summe ohne Rabatt
 // Verkaufspreis einer Sorte – mit Sonderpreis für einzelne Kunden (z.B. Hofladen), sonst der normale Preis
@@ -970,9 +1011,11 @@ function Stepper({ value, onChange, halbe }) {
 
 // Rabatt-Auswahl (Kein, 10 %, 15 % …)
 function RabattWahl({ wert, onChange, klein }) {
+  const w = Number(wert) || 0;
+  const liste = RABATTE.includes(w) ? RABATTE : [...RABATTE, w].sort((a, b) => a - b);
   return (
     <div className="flex flex-wrap gap-1.5">
-      {RABATTE.map((r) => {
+      {liste.map((r) => {
         const on = (Number(wert) || 0) === r;
         return (
           <button
@@ -1056,10 +1099,12 @@ function Wirtschaftlichkeit({ w, rabattLabel, nettoLabel = "Zu zahlen", mitRabat
   );
 }
 
-function BestellEditor({ start, sorten, kunden, lager, herstellProzent, letzteBestellung, onSave, onCancel, onNeuerKunde }) {
+function BestellEditor({ start, sorten, kunden, lager, herstellProzent, letzteBestellung, klasseVon, onSave, onCancel, onNeuerKunde }) {
   const [kundeName, setKundeName] = useState(start?.kundeName || "");
   const [items, setItems] = useState(start?.items || {});
   const [rabatt, setRabatt] = useState(Number(start?.rabatt) || 0);
+  // Bei neuen Bestellungen setzt die Stammkunden-Klasse den Rabatt, bis Börni selbst einen wählt
+  const [rabattManuell, setRabattManuell] = useState(!!start?.id);
   const [notiz, setNotiz] = useState(start?.notiz || "");
   const [quelle, setQuelle] = useState(start?.quelle || "whatsapp");
   const [waText, setWaText] = useState(start?.nachricht || "");
@@ -1069,6 +1114,11 @@ function BestellEditor({ start, sorten, kunden, lager, herstellProzent, letzteBe
 
   const kunde = kunden.find((k) => k.name.trim().toLowerCase() === kundeName.trim().toLowerCase());
   const letzte = kunde ? letzteBestellung(kunde.id) : null;
+  const stamm = kunde && klasseVon ? klasseVon(kunde) : null;
+  useEffect(() => {
+    if (rabattManuell) return;
+    setRabatt(stamm?.rabatt || 0);
+  }, [kunde?.id, stamm?.rabatt, rabattManuell]);
   const sichtbar = sorten.filter((s) => alleSorten || s.aktiv || (items[s.id] || 0) > 0);
   const wirtschaft = useMemo(() => bestellWirtschaft({ items, rabatt, kundeId: kunde?.id }, sorten, lager, herstellProzent), [items, rabatt, kunde?.id, sorten, lager, herstellProzent]);
   const summe = wirtschaft.netto;
@@ -1163,7 +1213,22 @@ function BestellEditor({ start, sorten, kunden, lager, herstellProzent, letzteBe
 
         <div className="flex flex-col gap-2">
           <span className="text-sm" style={{ color: COL.inkMuted }}>Rabatt</span>
-          <RabattWahl wert={rabatt} onChange={setRabatt} />
+          {stamm && (
+            <div className="text-xs px-3 py-2 rounded-xl" style={{ backgroundColor: COL.amberSoft, color: COL.amber }}>
+              {stamm.klasse ? (
+                <>
+                  ⭐ <b>{stamm.klasse}-Kunde</b> (Wiederverkäufer{stamm.manuell ? ", fest eingestellt" : `, Ø ${fmtNum(stamm.proWoche, 1)} Bestellungen/Woche`})
+                  {stamm.rabatt > 0 ? <> → <b>{fmtNum(stamm.rabatt, 1)} % Stammkunden-Rabatt</b></> : <> – Rabatt-Prozent fehlt noch (Einstellungen → Kunden)</>}
+                  {rabattManuell && Number(rabatt) !== stamm.rabatt && stamm.rabatt > 0 && (
+                    <button className="ml-2 underline font-semibold" onClick={() => { setRabatt(stamm.rabatt); setRabattManuell(false); }}>übernehmen</button>
+                  )}
+                </>
+              ) : (
+                <>🏪 Wiederverkäufer – {stamm.manuell ? "ohne Stammkunden-Rabatt" : "noch keine Stammkunden-Klasse (zu wenige Bestellungen in den letzten 4 Wochen)"}</>
+              )}
+            </div>
+          )}
+          <RabattWahl wert={rabatt} onChange={(r) => { setRabatt(r); setRabattManuell(true); }} />
           <Wirtschaftlichkeit w={wirtschaft} />
         </div>
 
@@ -1183,7 +1248,7 @@ function BestellEditor({ start, sorten, kunden, lager, herstellProzent, letzteBe
   );
 }
 
-function BestellungenTab({ nurLesen, backtag, sorten, kunden, lager, herstellProzent, updateBacktag, addKunde, letzteBestellung }) {
+function BestellungenTab({ nurLesen, backtag, sorten, kunden, lager, herstellProzent, updateBacktag, addKunde, letzteBestellung, klasseVon }) {
   const [editor, setEditor] = useState(null); // null | {} | bestellung
   const [suche, setSuche] = useState("");
   const kName = (id) => kunden.find((k) => k.id === id)?.name || "(unbekannt)";
@@ -1222,6 +1287,7 @@ function BestellungenTab({ nurLesen, backtag, sorten, kunden, lager, herstellPro
           lager={lager}
           herstellProzent={herstellProzent}
           letzteBestellung={letzteBestellung}
+          klasseVon={klasseVon}
           onSave={save}
           onCancel={() => setEditor(null)}
           onNeuerKunde={addKunde}
@@ -2877,11 +2943,72 @@ function EinstellungenTab({ daten, setDaten, lager, config, onReloadLager, onDis
             <div className="mt-2"><Btn primary onClick={kundenHinzu} disabled={!neueKunden.trim()}>Hinzufügen</Btn></div>
           </Card>
           <Card>
+            <H2>⭐ Stammkunden-Rabatt</H2>
+            <div className="text-xs mb-3" style={{ color: COL.inkMuted }}>
+              Nur für Wiederverkäufer (Firmen, Gasthäuser) – Privatkunden bekommen ihn nie. Die Klasse rechnet die App aus den Bestellungen der letzten 4 Wochen (Schnitt pro Woche).
+              Bei einer neuen Bestellung ist der Rabatt dann schon ausgewählt – du kannst ihn trotzdem ändern.
+            </div>
+            <div className="grid items-center gap-x-3 gap-y-2 text-sm" style={{ gridTemplateColumns: "auto auto auto" }}>
+              <span />
+              <span className="text-xs" style={{ color: COL.inkMuted }}>Bestellungen pro Woche</span>
+              <span className="text-xs" style={{ color: COL.inkMuted }}>Rabatt</span>
+              {["A", "B", "C"].map((kl) => (
+                <React.Fragment key={kl}>
+                  <b>{kl}-Kunde</b>
+                  <label className="flex items-center gap-1.5 whitespace-nowrap">
+                    ab
+                    <input
+                      style={{ ...inputStyle, width: 52, padding: "6px 8px" }}
+                      inputMode="numeric"
+                      value={daten.stammrabatt?.[`ab${kl}`] ?? ""}
+                      placeholder={String(STAMM_AB[kl])}
+                      onChange={(e) => setDaten((d) => ({ ...d, stammrabatt: { ...(d.stammrabatt || {}), [`ab${kl}`]: e.target.value } }))}
+                      aria-label={`${kl}-Kunde ab so vielen Bestellungen pro Woche`}
+                    />
+                  </label>
+                  <label className="flex items-center gap-1.5 whitespace-nowrap">
+                    <input
+                      style={{ ...inputStyle, width: 60, padding: "6px 8px", borderColor: zahl(daten.stammrabatt?.[kl]) > 0 ? COL.line : COL.amber }}
+                      inputMode="decimal"
+                      value={daten.stammrabatt?.[kl] ?? ""}
+                      placeholder="–"
+                      onChange={(e) => setDaten((d) => ({ ...d, stammrabatt: { ...(d.stammrabatt || {}), [kl]: e.target.value.replace(",", ".") } }))}
+                      aria-label={`Rabatt in Prozent für ${kl}-Kunden`}
+                    />
+                    %
+                  </label>
+                </React.Fragment>
+              ))}
+            </div>
+          </Card>
+          <Card>
             <H2>{daten.kunden.length} Kunden</H2>
+            <div className="text-xs mb-2" style={{ color: COL.inkMuted }}>🏪 = Wiederverkäufer (Firma / Gasthaus). Klasse „automatisch“ rechnet die App aus, oder du legst sie fest.</div>
             <div className="flex flex-col">
-              {[...daten.kunden].sort((a, b) => a.name.localeCompare(b.name, "de")).map((k, i) => (
-                <div key={k.id} className="flex items-center gap-2 py-1.5" style={{ borderTop: i ? `1px solid ${COL.line}` : "none" }}>
-                  <input style={{ ...inputStyle, flex: 1, padding: "6px 9px", fontSize: 14 }} value={k.name} onChange={(e) => setDaten((d) => ({ ...d, kunden: d.kunden.map((x) => (x.id === k.id ? { ...x, name: e.target.value } : x)) }))} />
+              {[...daten.kunden].sort((a, b) => a.name.localeCompare(b.name, "de")).map((k, i) => {
+                const st = kundeKlasse(daten, k, isoHeute());
+                const updK = (patch) => setDaten((d) => ({ ...d, kunden: d.kunden.map((x) => (x.id === k.id ? { ...x, ...patch } : x)) }));
+                return (
+                <div key={k.id} className="flex flex-wrap items-center gap-2 py-1.5" style={{ borderTop: i ? `1px solid ${COL.line}` : "none" }}>
+                  <input style={{ ...inputStyle, flex: 1, minWidth: 140, padding: "6px 9px", fontSize: 14 }} value={k.name} onChange={(e) => updK({ name: e.target.value })} />
+                  <label className="flex items-center gap-1 text-xs whitespace-nowrap" title="Wiederverkäufer (Firma / Gasthaus) – bekommt Stammkunden-Rabatt">
+                    <input type="checkbox" checked={!!k.wiederverkauf} onChange={(e) => updK({ wiederverkauf: e.target.checked })} /> 🏪 Wiederverkäufer
+                  </label>
+                  {k.wiederverkauf && (
+                    <>
+                      <select style={{ ...inputStyle, width: "auto", padding: "5px 6px", fontSize: 13 }} value={k.klasse || "auto"} onChange={(e) => updK({ klasse: e.target.value === "auto" ? undefined : e.target.value })} aria-label="Stammkunden-Klasse">
+                        <option value="auto">automatisch</option>
+                        <option value="A">immer A</option>
+                        <option value="B">immer B</option>
+                        <option value="C">immer C</option>
+                        <option value="keine">kein Rabatt</option>
+                      </select>
+                      <span className="text-xs font-semibold whitespace-nowrap" style={{ color: st?.klasse ? COL.amber : COL.inkMuted }}>
+                        {st?.klasse ? `${st.klasse}${st.rabatt > 0 ? ` · ${fmtNum(st.rabatt, 1)} %` : ""}` : "–"}
+                        {!st?.manuell ? ` · Ø ${fmtNum(st?.proWoche || 0, 1)}/Woche` : ""}
+                      </span>
+                    </>
+                  )}
                   <button
                     style={{ color: benutzteKunden.has(k.id) ? COL.line : COL.warn }}
                     disabled={benutzteKunden.has(k.id)}
@@ -2891,7 +3018,8 @@ function EinstellungenTab({ daten, setDaten, lager, config, onReloadLager, onDis
                     <IcTrash size={15} />
                   </button>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </Card>
         </>
@@ -3975,7 +4103,7 @@ function App() {
             </div>
           </Card>
         ) : tab === "bestellungen" ? (
-          <BestellungenTab nurLesen={!chef} backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} lager={lager} herstellProzent={herstellProzentVon(daten)} updateBacktag={updateBacktag} addKunde={addKunde} letzteBestellung={letzteBestellung} />
+          <BestellungenTab nurLesen={!chef} backtag={backtag} sorten={daten.sorten} kunden={daten.kunden} lager={lager} herstellProzent={herstellProzentVon(daten)} updateBacktag={updateBacktag} addKunde={addKunde} letzteBestellung={letzteBestellung} klasseVon={(k) => kundeKlasse(daten, k, backtag?.datum)} />
         ) : tab === "backzettel" ? (
           <BackzettelTab chef={chef} backtag={backtag} backtage={daten.backtage} sorten={daten.sorten} lager={lager} planer={daten.planer} updateBacktag={updateBacktag} onUebergeben={uebergeben} onReloadLager={() => ladeLager()} onDrucken={setDruck} />
         ) : tab === "einkauf" && chef ? (
